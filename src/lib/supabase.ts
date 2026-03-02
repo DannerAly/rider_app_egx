@@ -1,7 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-// Este es el cliente único que usará toda la app
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Cliente de Supabase para componentes del browser
+// Para Server Components y Route Handlers usar: @/lib/supabase/server
+// Para Client Components usar: @/lib/supabase/client
+export { createClient } from '@/lib/supabase/client'
