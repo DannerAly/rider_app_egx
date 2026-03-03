@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="192" height="192" rx="38" fill="url(#bg)"/>
+
+  <!-- Package icon centered -->
+  <g transform="translate(96,100)">
+    <!-- Box body -->
+    <path d="M-34 -6 L0 -26 L34 -6 L34 34 L0 54 L-34 34 Z"
+          fill="none" stroke="white" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- Top lid line -->
+    <path d="M-34 -6 L0 14 L34 -6"
+          fill="none" stroke="white" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- Center vertical line -->
+    <line x1="0" y1="14" x2="0" y2="54"
+          stroke="white" stroke-width="5.5" stroke-linecap="round"/>
+    <!-- Ribbon horizontal across top -->
+    <line x1="-10" y1="-18" x2="10" y2="-18"
+          stroke="rgba(255,255,255,0.5)" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>
