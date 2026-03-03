@@ -22,13 +22,16 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
-  const { status, notes } = await request.json() as { status: OrderStatus; notes?: string }
+  const { status, notes, delivery_photo_url } = await request.json() as {
+    status: OrderStatus; notes?: string; delivery_photo_url?: string
+  }
 
   if (!status) return NextResponse.json({ error: 'status requerido' }, { status: 400 })
 
   const update: Record<string, unknown> = { status }
   const tsField = TIMESTAMP_FIELD[status]
   if (tsField) update[tsField] = new Date().toISOString()
+  if (delivery_photo_url) update.delivery_photo_url = delivery_photo_url
 
   const { data, error } = await supabase
     .from('orders')

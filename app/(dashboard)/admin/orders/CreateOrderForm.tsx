@@ -40,6 +40,7 @@ export default function CreateOrderForm({ zones }: { zones: Zone[] }) {
   const [packageDesc,   setPackageDesc]   = useState('')
   const [packageWeight, setPackageWeight] = useState('')
   const [zoneId,        setZoneId]        = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
 
   const handleMapConfirm = (loc: PickedLocation) => {
     if (mapTarget === 'pickup')   setPickupLoc(loc)
@@ -74,6 +75,7 @@ export default function CreateOrderForm({ zones }: { zones: Zone[] }) {
         package_description: packageDesc   || null,
         package_weight_kg:   packageWeight ? parseFloat(packageWeight) : null,
         zone_id:             zoneId        || null,
+        customer_phone:      customerPhone || null,
       }),
     })
     const json = await res.json()
@@ -85,7 +87,7 @@ export default function CreateOrderForm({ zones }: { zones: Zone[] }) {
     setOpen(false)
     setPickupLoc(null); setPickupName(''); setPickupPhone(''); setPickupNotes('')
     setDeliveryLoc(null); setDeliveryName(''); setDeliveryPhone(''); setDeliveryNotes('')
-    setPriority('normal'); setPackageDesc(''); setPackageWeight(''); setZoneId('')
+    setPriority('normal'); setPackageDesc(''); setPackageWeight(''); setZoneId(''); setCustomerPhone('')
     router.refresh()
   }
 

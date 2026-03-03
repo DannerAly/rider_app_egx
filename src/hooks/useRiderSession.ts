@@ -168,12 +168,15 @@ export function useRiderSession(riderId: string) {
     return true
   }, [])
 
-  const updateOrderStatus = useCallback(async (newStatus: string) => {
+  const updateOrderStatus = useCallback(async (newStatus: string, deliveryPhotoUrl?: string) => {
     if (!activeOrder) return
     await fetch(`/api/orders/${activeOrder.id}/status`, {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
+      body: JSON.stringify({
+        status: newStatus,
+        ...(deliveryPhotoUrl ? { delivery_photo_url: deliveryPhotoUrl } : {}),
+      }),
     })
     if (['delivered', 'cancelled', 'failed'].includes(newStatus)) {
       setActiveOrder(null)

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import StatusBadge from '@/components/orders/StatusBadge'
 import OrderMap from '@/components/map/OrderMap'
 import OrderActions from './OrderActions'
-import { ArrowLeft, MapPin, Flag, Package, User, DollarSign, Hash, Clock, ExternalLink } from 'lucide-react'
+import { ArrowLeft, MapPin, Flag, Package, User, DollarSign, Hash, Clock, ExternalLink, MessageCircle, Image } from 'lucide-react'
 
 const PRIORITY_LABEL: Record<string, string> = {
   low: '🔵 Baja', normal: '⚪ Normal', high: '🟠 Alta', urgent: '🔴 Urgente',
@@ -107,6 +107,21 @@ export default async function OrderDetailPage({ params }: PageProps) {
           Ver tracking
         </Link>
 
+        {/* WhatsApp: compartir tracking con el cliente */}
+        {order.delivery_contact_phone && (
+          <a
+            href={`https://wa.me/${order.delivery_contact_phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+              `Hola ${order.delivery_contact_name ?? ''}, tu pedido #${order.order_number} está en camino. Sigue tu entrega aquí: ${process.env.NEXT_PUBLIC_APP_URL ?? ''}/track/${order.tracking_code}`
+            )}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-green-200 bg-green-50 text-sm text-green-700 hover:bg-green-100 transition-colors"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            WhatsApp
+          </a>
+        )}
+
         <div className="ml-auto">
           <OrderActions
             orderId={order.id}
@@ -187,6 +202,22 @@ export default async function OrderDetailPage({ params }: PageProps) {
           )}
         </div>
       </div>
+
+      {/* ── Foto de entrega ──────────────────────────────────────────────── */}
+      {(order as any).delivery_photo_url && (
+        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Image className="w-4 h-4 text-zinc-400" />
+            <h3 className="font-semibold text-zinc-800 text-sm">Foto de entrega</h3>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={(order as any).delivery_photo_url}
+            alt="Foto de entrega"
+            className="w-full max-w-sm rounded-xl object-cover border border-zinc-100"
+          />
+        </div>
+      )}
 
       {/* ── Timeline de estados ───────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-zinc-200 p-5">

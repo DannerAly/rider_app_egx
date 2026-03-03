@@ -1,10 +1,12 @@
 'use client'
 
 import { useRiderSession } from '@/hooks/useRiderSession'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
 import {
   Power, MapPin, Phone, Navigation,
   Package, CheckCircle, Loader2, ChevronRight, Clock, AlertCircle, History,
+  Camera, X,
 } from 'lucide-react'
 
 const ORDER_STEPS: Record<string, { label: string; next: string; nextLabel: string; color: string }> = {
@@ -29,6 +31,40 @@ export default function RiderDashboard({ riderId, name }: Props) {
     isLoading, acceptingId, acceptError,
     toggleStatus, acceptOrder, updateOrderStatus,
   } = useRiderSession(riderId)
+
+  const [photoFile, setPhotoFile]     = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [uploading, setUploading]     = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleDeliveryConfirm = async () => {
+    if (!activeOrder) return
+    let photoUrl: string | undefined
+    if (photoFile) {
+      setUploading(true)
+      const fd = new FormData()
+      fd.append('photo', photoFile)
+      try {
+        const res = await fetch(`/api/orders/${activeOrder.id}/upload-photo`, {
+          method: 'POST', body: fd,
+        })
+        const json = await res.json()
+        photoUrl = json.url
+      } finally {
+        setUploading(false)
+      }
+    }
+    await updateOrderStatus('delivered', photoUrl)
+    setPhotoFile(null)
+    setPhotoPreview(null)
+  }
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setPhotoFile(f)
+    setPhotoPreview(URL.createObjectURL(f))
+  }
 
   if (isLoading) {
     return (
@@ -136,14 +172,59 @@ export default function RiderDashboard({ riderId, name }: Props) {
                 Navegar
               </a>
 
-              {/* Avanzar estado */}
-              <button
-                onClick={() => updateOrderStatus(orderStep.next)}
-                className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-white text-zinc-900 font-bold text-base transition-all hover:bg-zinc-100 active:scale-95"
-              >
-                <CheckCircle className="w-5 h-5" />
-                {orderStep.nextLabel}
-              </button>
+              {/* Avanzar estado — en in_transit pide foto */}
+              {activeOrder.status === 'in_transit' ? (
+                <div className="space-y-3">
+                  {/* Selector de foto */}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handlePhotoChange}
+                  />
+                  {photoPreview ? (
+                    <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photoPreview} alt="Foto de entrega" className="w-full h-40 object-cover rounded-xl" />
+                      <button
+                        onClick={() => { setPhotoFile(null); setPhotoPreview(null) }}
+                        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center"
+                      >
+                        <X className="w-3.5 h-3.5 text-white" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-dashed border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-300 text-sm transition-colors"
+                    >
+                      <Camera className="w-4 h-4" />
+                      Tomar foto de entrega (opcional)
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleDeliveryConfirm}
+                    disabled={uploading}
+                    className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-white text-zinc-900 font-bold text-base transition-all hover:bg-zinc-100 active:scale-95 disabled:opacity-60"
+                  >
+                    {uploading
+                      ? <Loader2 className="w-5 h-5 animate-spin" />
+                      : <CheckCircle className="w-5 h-5" />}
+                    {uploading ? 'Subiendo foto...' : '✅  Confirmar entrega'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => updateOrderStatus(orderStep.next)}
+                  className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-white text-zinc-900 font-bold text-base transition-all hover:bg-zinc-100 active:scale-95"
+                >
+                  <CheckCircle className="w-5 h-5" />
+                  {orderStep.nextLabel}
+                </button>
+              )}
 
               {activeOrder.total_fee > 0 && (
                 <p className="text-center text-zinc-500 text-sm">
