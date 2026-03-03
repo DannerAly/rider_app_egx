@@ -1,9 +1,10 @@
 'use client'
 
 import { useRiderSession } from '@/hooks/useRiderSession'
+import Link from 'next/link'
 import {
   Power, MapPin, Phone, Navigation,
-  Package, CheckCircle, Loader2, ChevronRight, Clock, AlertCircle,
+  Package, CheckCircle, Loader2, ChevronRight, Clock, AlertCircle, History,
 } from 'lucide-react'
 
 const ORDER_STEPS: Record<string, { label: string; next: string; nextLabel: string; color: string }> = {
@@ -44,9 +45,18 @@ export default function RiderDashboard({ riderId, name }: Props) {
     <div className="min-h-screen bg-zinc-950 flex flex-col pb-8">
 
       {/* Header */}
-      <div className="px-5 pt-12 pb-5">
-        <p className="text-zinc-500 text-sm">Bienvenido,</p>
-        <h1 className="text-white text-2xl font-bold mt-0.5">{name}</h1>
+      <div className="px-5 pt-12 pb-5 flex items-start justify-between">
+        <div>
+          <p className="text-zinc-500 text-sm">Bienvenido,</p>
+          <h1 className="text-white text-2xl font-bold mt-0.5">{name}</h1>
+        </div>
+        <Link
+          href="/rider/history"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors mt-1"
+        >
+          <History className="w-4 h-4" />
+          Historial
+        </Link>
       </div>
 
       {/* Toggle de turno */}

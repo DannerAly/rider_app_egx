@@ -49,8 +49,16 @@ export async function POST(request: Request) {
     Math.cos(pickup_lat * Math.PI / 180) * Math.cos(delivery_lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2
   const distance_km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 
-  const base_fee     = 10                            // Bs. tarifa base
-  const delivery_fee = parseFloat((distance_km * 2).toFixed(2))  // Bs. 2 por km
+  // Leer tarifas desde settings
+  const { data: settingsRows } = await supabase
+    .from('settings')
+    .select('key, value')
+    .in('key', ['base_fee', 'fee_per_km'])
+
+  const settingsMap = Object.fromEntries((settingsRows ?? []).map(s => [s.key, parseFloat(s.value)]))
+  const base_fee     = settingsMap['base_fee']    ?? 10
+  const fee_per_km   = settingsMap['fee_per_km']  ?? 2
+  const delivery_fee = parseFloat((distance_km * fee_per_km).toFixed(2))
   const total_fee    = parseFloat((base_fee + delivery_fee).toFixed(2))
 
   const { data, error } = await supabase.from('orders').insert({

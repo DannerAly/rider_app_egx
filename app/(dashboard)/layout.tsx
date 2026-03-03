@@ -28,7 +28,7 @@ export default async function DashboardLayout({
       <Sidebar role={role as 'admin' | 'dispatcher' | 'rider' | 'customer'} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header name={fullName} email={email} role={role} />
+        <Header name={fullName} email={email} role={role} userId={user.id} />
 
         <main className="flex-1 overflow-y-auto p-6">
           {children}

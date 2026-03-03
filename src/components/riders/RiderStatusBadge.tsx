@@ -1,15 +1,20 @@
-const CONFIG: Record<string, { label: string; dot: string; className: string }> = {
-  available: { label: 'Disponible',   dot: 'bg-green-500',  className: 'bg-green-100 text-green-800' },
-  busy:      { label: 'En pedido',    dot: 'bg-yellow-500', className: 'bg-yellow-100 text-yellow-800' },
-  on_break:  { label: 'Descanso',     dot: 'bg-orange-500', className: 'bg-orange-100 text-orange-800' },
-  offline:   { label: 'Desconectado', dot: 'bg-zinc-400',   className: 'bg-zinc-100 text-zinc-600' },
+import { cn } from '@/lib/utils'
+
+const CONFIG: Record<string, { label: string; dot: string; cls: string }> = {
+  available: { label: 'Disponible',   dot: 'bg-emerald-500 animate-pulse', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  busy:      { label: 'En pedido',    dot: 'bg-blue-500 animate-pulse',    cls: 'border-blue-200 bg-blue-50 text-blue-700' },
+  on_break:  { label: 'Descanso',     dot: 'bg-amber-400',                 cls: 'border-amber-200 bg-amber-50 text-amber-700' },
+  offline:   { label: 'Desconectado', dot: 'bg-zinc-400',                  cls: 'border-zinc-200 bg-zinc-100 text-zinc-500' },
 }
 
 export default function RiderStatusBadge({ status }: { status: string }) {
   const cfg = CONFIG[status] ?? CONFIG.offline
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${cfg.className}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+    <span className={cn(
+      'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border',
+      cfg.cls
+    )}>
+      <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', cfg.dot)} />
       {cfg.label}
     </span>
   )
