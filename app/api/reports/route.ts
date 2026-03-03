@@ -1,31 +1,47 @@
+import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import ReportsClient from './ReportsClient'
-import type { ReportsData } from './ReportsClient'
 
-async function getReportData(): Promise<ReportsData> {
+export async function GET(request: Request) {
   const supabase = await createClient()
 
-  // Last 30 days
-  const to = new Date()
-  const from = new Date()
-  from.setDate(from.getDate() - 29)
+  // Auth check
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+  }
+
+  // Parse date range from query params
+  const { searchParams } = new URL(request.url)
+  const fromParam = searchParams.get('from')
+  const toParam = searchParams.get('to')
+
+  const to = toParam ? new Date(toParam + 'T23:59:59.999Z') : new Date()
+  const from = fromParam
+    ? new Date(fromParam + 'T00:00:00.000Z')
+    : new Date(new Date().setDate(to.getDate() - 29))
   from.setHours(0, 0, 0, 0)
 
   const fromISO = from.toISOString()
   const toISO = to.toISOString()
 
-  // Fetch all orders in range
-  const { data: ordersInRange } = await supabase
+  // Fetch orders in range
+  const { data: ordersInRange, error: ordersErr } = await supabase
     .from('orders')
     .select('id, status, total_fee, created_at, delivered_at, rider_id')
     .gte('created_at', fromISO)
     .lte('created_at', toISO)
     .order('created_at')
 
+  if (ordersErr) {
+    return NextResponse.json({ error: ordersErr.message }, { status: 500 })
+  }
+
   const orders = ordersInRange ?? []
 
-  // 1. Daily stats grouped by date
+  // 1. dailyStats: group by date
   const dailyMap: Record<string, { total: number; delivered: number; revenue: number }> = {}
+
+  // Pre-populate all dates in range
   const current = new Date(from)
   while (current <= to) {
     const key = current.toISOString().split('T')[0]
@@ -33,7 +49,7 @@ async function getReportData(): Promise<ReportsData> {
     current.setDate(current.getDate() + 1)
   }
 
-  orders.forEach((o: any) => {
+  orders.forEach((o) => {
     const key = o.created_at.split('T')[0]
     if (dailyMap[key]) {
       dailyMap[key].total++
@@ -49,15 +65,15 @@ async function getReportData(): Promise<ReportsData> {
     ...d,
   }))
 
-  // 2. Status counts
+  // 2. statusCounts
   const statusCounts: Record<string, number> = {}
-  orders.forEach((o: any) => {
+  orders.forEach((o) => {
     statusCounts[o.status] = (statusCounts[o.status] ?? 0) + 1
   })
 
-  // 3. Top riders: aggregate deliveries by rider in this range
+  // 3. topRiders: aggregate deliveries by rider in this range
   const riderDeliveries: Record<string, { deliveries: number; earnings: number }> = {}
-  orders.forEach((o: any) => {
+  orders.forEach((o) => {
     if (o.status === 'delivered' && o.rider_id) {
       if (!riderDeliveries[o.rider_id]) {
         riderDeliveries[o.rider_id] = { deliveries: 0, earnings: 0 }
@@ -67,10 +83,12 @@ async function getReportData(): Promise<ReportsData> {
     }
   })
 
+  // Get top 10 rider IDs by deliveries
   const topRiderIds = Object.entries(riderDeliveries)
     .sort((a, b) => b[1].deliveries - a[1].deliveries)
     .slice(0, 10)
 
+  // Fetch rider names
   let topRiders: { name: string; deliveries: number; earnings: number }[] = []
   if (topRiderIds.length > 0) {
     const ids = topRiderIds.map(([id]) => id)
@@ -80,7 +98,7 @@ async function getReportData(): Promise<ReportsData> {
       .in('id', ids)
 
     const nameMap: Record<string, string> = {}
-    profiles?.forEach((p: any) => {
+    profiles?.forEach((p) => {
       nameMap[p.id] = p.full_name ?? 'Sin nombre'
     })
 
@@ -91,21 +109,22 @@ async function getReportData(): Promise<ReportsData> {
     }))
   }
 
-  // 4. Summary KPIs
+  // 4. summary KPIs
   const totalOrders = orders.length
-  const totalDelivered = orders.filter((o: any) => o.status === 'delivered').length
+  const totalDelivered = orders.filter((o) => o.status === 'delivered').length
   const successRate = totalOrders > 0 ? parseFloat(((totalDelivered / totalOrders) * 100).toFixed(1)) : 0
   const totalRevenue = parseFloat(
     orders
-      .filter((o: any) => o.status === 'delivered')
-      .reduce((sum: number, o: any) => sum + Number(o.total_fee ?? 0), 0)
+      .filter((o) => o.status === 'delivered')
+      .reduce((sum, o) => sum + Number(o.total_fee ?? 0), 0)
       .toFixed(2)
   )
 
-  const deliveredOrders = orders.filter((o: any) => o.status === 'delivered' && o.delivered_at)
+  // Avg delivery time in minutes (delivered_at - created_at)
+  const deliveredOrders = orders.filter((o) => o.status === 'delivered' && o.delivered_at)
   let avgDeliveryTimeMins = 0
   if (deliveredOrders.length > 0) {
-    const totalMins = deliveredOrders.reduce((sum: number, o: any) => {
+    const totalMins = deliveredOrders.reduce((sum, o) => {
       const created = new Date(o.created_at).getTime()
       const delivered = new Date(o.delivered_at).getTime()
       return sum + (delivered - created) / 60000
@@ -113,7 +132,7 @@ async function getReportData(): Promise<ReportsData> {
     avgDeliveryTimeMins = parseFloat((totalMins / deliveredOrders.length).toFixed(1))
   }
 
-  return {
+  return NextResponse.json({
     daily,
     statusCounts,
     topRiders,
@@ -124,11 +143,5 @@ async function getReportData(): Promise<ReportsData> {
       totalRevenue,
       avgDeliveryTimeMins,
     },
-  }
-}
-
-export default async function ReportsPage() {
-  const data = await getReportData()
-
-  return <ReportsClient initialData={data} />
+  })
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { MapContainer, TileLayer, Polyline, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -86,7 +86,10 @@ const riderIcon = L.divIcon({
 function Markers(props: OrderMapProps) {
   const { pickupLat, pickupLng, deliveryLat, deliveryLng, riderLat, riderLng, deliveryLabel } = props
   const map = useMap()
+  const riderMarkerRef = useRef<L.Marker | null>(null)
+  const animFrameRef = useRef<number | null>(null)
 
+  // ── Efecto 1: Markers estáticos (pickup / delivery) ──────────────────────
   useEffect(() => {
     const markers: L.Marker[] = []
 
@@ -104,23 +107,89 @@ function Markers(props: OrderMapProps) {
         .addTo(map),
     )
 
-    if (riderLat && riderLng) {
-      markers.push(
-        L.marker([riderLat, riderLng], { icon: riderIcon })
-          .bindTooltip('Rider', { direction: 'top', offset: [0, -6] })
-          .addTo(map)
-      )
+    return () => { markers.forEach(m => m.remove()) }
+  }, [map, pickupLat, pickupLng, deliveryLat, deliveryLng, deliveryLabel])
+
+  // ── Interpolación suave para el rider ────────────────────────────────────
+  const animateRiderTo = useCallback((marker: L.Marker, targetLat: number, targetLng: number) => {
+    // Cancel any in-progress animation
+    if (animFrameRef.current !== null) {
+      cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = null
     }
 
+    const startPos = marker.getLatLng()
+    const startLat = startPos.lat
+    const startLng = startPos.lng
+
+    // Skip animation if position hasn't actually changed
+    if (Math.abs(startLat - targetLat) < 1e-7 && Math.abs(startLng - targetLng) < 1e-7) return
+
+    const totalFrames = 30
+    let frame = 0
+
+    function step() {
+      frame++
+      const t = Math.min(frame / totalFrames, 1)
+      // Ease-out quadratic for smooth deceleration
+      const ease = t * (2 - t)
+      const lat = startLat + (targetLat - startLat) * ease
+      const lng = startLng + (targetLng - startLng) * ease
+      marker.setLatLng([lat, lng])
+
+      if (frame < totalFrames) {
+        animFrameRef.current = requestAnimationFrame(step)
+      } else {
+        animFrameRef.current = null
+      }
+    }
+
+    animFrameRef.current = requestAnimationFrame(step)
+  }, [])
+
+  // ── Efecto 2: Rider marker con animación suave ──────────────────────────
+  useEffect(() => {
+    if (riderLat != null && riderLng != null) {
+      if (riderMarkerRef.current) {
+        // Marker ya existe: animar suavemente a la nueva posición
+        animateRiderTo(riderMarkerRef.current, riderLat, riderLng)
+      } else {
+        // Crear marker nuevo
+        riderMarkerRef.current = L.marker([riderLat, riderLng], { icon: riderIcon })
+          .bindTooltip('Rider', { direction: 'top', offset: [0, -6] })
+          .addTo(map)
+      }
+    } else {
+      // Sin coordenadas de rider: remover marker si existe
+      if (riderMarkerRef.current) {
+        riderMarkerRef.current.remove()
+        riderMarkerRef.current = null
+      }
+    }
+  }, [map, riderLat, riderLng, animateRiderTo])
+
+  // ── Fit bounds cuando cambia cualquier posición ──────────────────────────
+  useEffect(() => {
     const bounds = L.latLngBounds([
       [pickupLat, pickupLng],
       [deliveryLat, deliveryLng],
-      ...(riderLat && riderLng ? [[riderLat, riderLng] as [number, number]] : []),
+      ...(riderLat != null && riderLng != null ? [[riderLat, riderLng] as [number, number]] : []),
     ])
     map.fitBounds(bounds, { padding: [52, 52] })
+  }, [map, pickupLat, pickupLng, deliveryLat, deliveryLng, riderLat, riderLng])
 
-    return () => { markers.forEach(m => m.remove()) }
-  }, [map, pickupLat, pickupLng, deliveryLat, deliveryLng, riderLat, riderLng, deliveryLabel])
+  // ── Cleanup del rider marker y animación al desmontar ────────────────────
+  useEffect(() => {
+    return () => {
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current)
+      }
+      if (riderMarkerRef.current) {
+        riderMarkerRef.current.remove()
+        riderMarkerRef.current = null
+      }
+    }
+  }, [])
 
   return null
 }

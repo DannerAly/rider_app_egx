@@ -64,3 +64,31 @@ self.addEventListener('fetch', event => {
       })
   );
 });
+
+// Push notification handler
+self.addEventListener('push', event => {
+  const data = event.data?.json() ?? {}
+  const { title = 'Rider EGX', body = '', url = '/rider' } = data
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon-192x192.png',
+      badge: '/icon-192x192.png',
+      vibrate: [200, 100, 200],
+      tag: 'rider-egx-notification',
+      data: { url },
+    })
+  )
+})
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close()
+  const url = event.notification.data?.url || '/rider'
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      const existing = windowClients.find(c => c.url.includes(url))
+      if (existing) return existing.focus()
+      return clients.openWindow(url)
+    })
+  )
+})

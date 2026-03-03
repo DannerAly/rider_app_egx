@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   Power, MapPin, Phone, Navigation,
   Package, CheckCircle, Loader2, ChevronRight, Clock, AlertCircle, History,
-  Camera, X,
+  Camera, X, Volume2, VolumeX,
 } from 'lucide-react'
 
 const ORDER_STEPS: Record<string, { label: string; next: string; nextLabel: string; color: string }> = {
@@ -29,6 +29,7 @@ export default function RiderDashboard({ riderId, name }: Props) {
   const {
     riderStatus, activeOrder, availableOrders,
     isLoading, acceptingId, acceptError,
+    soundEnabled, toggleSound,
     toggleStatus, acceptOrder, updateOrderStatus,
   } = useRiderSession(riderId)
 
@@ -86,13 +87,27 @@ export default function RiderDashboard({ riderId, name }: Props) {
           <p className="text-zinc-500 text-sm">Bienvenido,</p>
           <h1 className="text-white text-2xl font-bold mt-0.5">{name}</h1>
         </div>
-        <Link
-          href="/rider/history"
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors mt-1"
-        >
-          <History className="w-4 h-4" />
-          Historial
-        </Link>
+        <div className="flex items-center gap-2 mt-1">
+          <button
+            onClick={toggleSound}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm transition-colors ${
+              soundEnabled ? 'text-zinc-400 hover:text-white' : 'text-red-400 hover:text-red-300'
+            }`}
+            title={soundEnabled ? 'Sonido activado' : 'Sonido desactivado'}
+          >
+            {soundEnabled
+              ? <Volume2 className="w-4 h-4" />
+              : <VolumeX className="w-4 h-4" />
+            }
+          </button>
+          <Link
+            href="/rider/history"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors"
+          >
+            <History className="w-4 h-4" />
+            Historial
+          </Link>
+        </div>
       </div>
 
       {/* Toggle de turno */}

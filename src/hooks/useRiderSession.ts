@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 type RiderStatus = 'offline' | 'available' | 'busy' | 'on_break'
@@ -42,8 +42,46 @@ export function useRiderSession(riderId: string) {
   const [isLoading,        setIsLoading]         = useState(true)
   const [acceptingId,      setAcceptingId]       = useState<string | null>(null)
   const [acceptError,      setAcceptError]       = useState<string | null>(null)
+  const [soundEnabled,     setSoundEnabled]      = useState(true)
+
+  // Audio ref para notificación de nuevo pedido
+  // NOTA: /public/sounds/new-order.mp3 es un placeholder — reemplazar con un audio real
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const supabase = createClient()
+
+  // ── Inicializar audio y preferencia de sonido desde localStorage ──────────
+  useEffect(() => {
+    audioRef.current = new Audio('/sounds/new-order.mp3')
+    audioRef.current.preload = 'auto'
+
+    const stored = localStorage.getItem('rider-sound-enabled')
+    if (stored !== null) {
+      setSoundEnabled(stored === 'true')
+    }
+  }, [])
+
+  // ── Notificar nuevo pedido (sonido + vibración) ──────────────────────────
+  const notifyNewOrder = useCallback(() => {
+    if (soundEnabled && audioRef.current) {
+      audioRef.current.currentTime = 0
+      audioRef.current.play().catch(() => {
+        // Autoplay bloqueado por el navegador — se ignora silenciosamente
+      })
+    }
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200])
+    }
+  }, [soundEnabled])
+
+  // ── Toggle sonido con persistencia ───────────────────────────────────────
+  const toggleSound = useCallback(() => {
+    setSoundEnabled(prev => {
+      const next = !prev
+      localStorage.setItem('rider-sound-enabled', String(next))
+      return next
+    })
+  }, [])
 
   // ── Carga inicial ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -83,6 +121,10 @@ export function useRiderSession(riderId: string) {
         const order = payload.new as ActiveOrder & { status: string }
         const active = ['assigned', 'heading_to_pickup', 'picked_up', 'in_transit']
         if (active.includes(order.status)) {
+          // Notificar al rider cuando se le asigna un pedido
+          if (order.status === 'assigned') {
+            notifyNewOrder()
+          }
           setActiveOrder(order)
           setRiderStatus('busy')
           // Quitar de disponibles si estaba ahí
@@ -94,7 +136,7 @@ export function useRiderSession(riderId: string) {
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [riderId])
+  }, [riderId, notifyNewOrder])
 
   // ── Realtime: pedidos disponibles ─────────────────────────────────────────
   useEffect(() => {
@@ -106,6 +148,7 @@ export function useRiderSession(riderId: string) {
         const o = payload.new as AvailableOrder & { status: string; rider_id: string | null }
         if (o.status === 'pending' && !o.rider_id) {
           setAvailableOrders(prev => [o as AvailableOrder, ...prev].slice(0, 20))
+          notifyNewOrder()
         }
       })
       .on('postgres_changes', {
@@ -119,7 +162,7 @@ export function useRiderSession(riderId: string) {
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [notifyNewOrder])
 
   // ── GPS: transmitir ubicación mientras está activo ────────────────────────
   useEffect(() => {
@@ -189,6 +232,7 @@ export function useRiderSession(riderId: string) {
   return {
     riderStatus, activeOrder, availableOrders,
     isLoading, acceptingId, acceptError,
+    soundEnabled, toggleSound,
     toggleStatus, acceptOrder, updateOrderStatus,
   }
 }

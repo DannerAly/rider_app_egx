@@ -58,5 +58,14 @@ export async function POST(
   // Actualizar estado del rider a busy
   await supabase.from('riders').update({ status: 'busy' }).eq('id', user.id)
 
+  // Push de confirmación
+  import('@/lib/web-push').then(({ sendPushToUser }) => {
+    sendPushToUser(user.id, {
+      title: 'Pedido aceptado',
+      body: `Has aceptado el pedido ${data.order_number}`,
+      url: '/rider',
+    }).catch(() => {})
+  }).catch(() => {})
+
   return NextResponse.json({ data })
 }

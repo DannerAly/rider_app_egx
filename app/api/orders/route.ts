@@ -35,6 +35,7 @@ export async function POST(request: Request) {
     priority = 'normal',
     scheduled_at,
     zone_id,
+    customer_phone,
   } = body
 
   if (!pickup_address || !pickup_lat || !pickup_lng || !delivery_address || !delivery_lat || !delivery_lng) {
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
     delivery_address, delivery_lat, delivery_lng,
     delivery_contact_name, delivery_contact_phone, delivery_notes,
     package_description, package_weight_kg,
-    priority, scheduled_at, zone_id,
+    priority, scheduled_at, zone_id, customer_phone,
     distance_km: parseFloat(distance_km.toFixed(2)),
     base_fee, delivery_fee, total_fee,
     dispatcher_id: user.id,

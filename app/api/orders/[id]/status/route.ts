@@ -54,5 +54,16 @@ export async function PATCH(
     } catch { /* función opcional, no bloquea */ }
   }
 
+  // Notificar al rider por push si se le asigna
+  if (status === 'assigned' && data.rider_id) {
+    import('@/lib/web-push').then(({ sendPushToUser }) => {
+      sendPushToUser(data.rider_id, {
+        title: 'Nuevo pedido asignado',
+        body: `Pedido ${data.order_number} te ha sido asignado`,
+        url: '/rider',
+      }).catch(() => {})
+    }).catch(() => {})
+  }
+
   return NextResponse.json({ data })
 }

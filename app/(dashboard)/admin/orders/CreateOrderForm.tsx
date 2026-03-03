@@ -189,6 +189,9 @@ export default function CreateOrderForm({ zones }: { zones: Zone[] }) {
                 <Field label="Peso (kg)">
                   <input type="number" min="0" step="0.1" value={packageWeight} onChange={e => setPackageWeight(e.target.value)} placeholder="0.5" className={inputCls} />
                 </Field>
+                <Field label="Tel. cliente (para portal)">
+                  <input value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="+591 700 00000" className={inputCls} />
+                </Field>
               </Section>
 
               {error && (

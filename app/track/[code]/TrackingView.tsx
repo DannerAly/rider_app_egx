@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { Package, MapPin, Flag, CheckCircle, Clock, XCircle, Bike, RefreshCw } from 'lucide-react'
 
@@ -71,26 +71,33 @@ function secondsAgo(ts: string | null) {
 }
 
 export default function TrackingView({ initial, code }: { initial: TrackingData; code: string }) {
-  const [data,        setData]        = useState<TrackingData>(initial)
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
-  const [refreshing,  setRefreshing]  = useState(false)
+  const [data,          setData]          = useState<TrackingData>(initial)
+  const [lastRefresh,   setLastRefresh]   = useState<Date>(new Date())
+  const [refreshing,    setRefreshing]    = useState(false)
+  const [statusChanged, setStatusChanged] = useState(false)
+  const prevStatusRef = useRef<string>(initial.status)
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
     const res = await fetch(`/api/track/${code}`)
     if (res.ok) {
       const json = await res.json()
+      if (json.status !== prevStatusRef.current) {
+        prevStatusRef.current = json.status
+        setStatusChanged(true)
+        setTimeout(() => setStatusChanged(false), 3000)
+      }
       setData(json)
       setLastRefresh(new Date())
     }
     setRefreshing(false)
   }, [code])
 
-  // Auto-refresh cada 12 segundos si el pedido está activo
+  // Auto-refresh cada 5 segundos si el pedido está activo
   useEffect(() => {
     const active = !['delivered', 'cancelled', 'failed'].includes(data.status)
     if (!active) return
-    const id = setInterval(refresh, 12000)
+    const id = setInterval(refresh, 5000)
     return () => clearInterval(id)
   }, [data.status, refresh])
 
@@ -122,7 +129,9 @@ export default function TrackingView({ initial, code }: { initial: TrackingData;
       </div>
 
       {/* ── Status hero ───────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-zinc-200 p-6 text-center">
+      <div className={`bg-white rounded-2xl border border-zinc-200 p-6 text-center transition-all duration-500 ${
+        statusChanged ? 'ring-2 ring-blue-400 animate-pulse scale-105' : ''
+      }`}>
         <p className={`text-2xl font-bold mb-1 ${msg.color}`}>{msg.title}</p>
         <p className="text-zinc-500 text-sm">{msg.subtitle}</p>
 
@@ -226,7 +235,7 @@ export default function TrackingView({ initial, code }: { initial: TrackingData;
         <span>
           {isTerminal
             ? 'Pedido finalizado'
-            : `Actualiza automáticamente cada 12 seg`}
+            : `Actualiza automáticamente cada 5 seg`}
         </span>
         <button
           onClick={refresh}
