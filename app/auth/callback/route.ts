@@ -3,11 +3,6 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-/**
- * GET /auth/callback
- * Callback para OAuth providers (Google, Apple, etc).
- * Supabase redirige aquí después del login social.
- */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
@@ -27,9 +22,13 @@ export async function GET(request: Request) {
           return cookieStore.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options)
-          })
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // Server Component context — ignorar
+          }
         },
       },
     }
@@ -38,6 +37,7 @@ export async function GET(request: Request) {
   const { error } = await supabase.auth.exchangeCodeForSession(code)
 
   if (error) {
+    console.error('OAuth exchange error:', error.message)
     return NextResponse.redirect(`${origin}/login?error=exchange_failed`)
   }
 
@@ -56,7 +56,6 @@ export async function GET(request: Request) {
     .single()
 
   if (!profile) {
-    // Nuevo usuario OAuth → crear perfil como customer
     const fullName = user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'Usuario'
 
     await admin.from('profiles').upsert({
@@ -73,7 +72,6 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/customer`)
   }
 
-  // Redirigir según rol
   const ROLE_HOME: Record<string, string> = {
     admin: '/admin', dispatcher: '/dispatcher', rider: '/rider',
     customer: '/customer', merchant: '/merchant',

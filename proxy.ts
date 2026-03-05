@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Rutas que NO requieren autenticación
-const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/track', '/unauthorized']
+const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/track', '/unauthorized', '/auth/callback']
 
 // Mapeo de rol → ruta home
 const ROLE_HOME: Record<string, string> = {
