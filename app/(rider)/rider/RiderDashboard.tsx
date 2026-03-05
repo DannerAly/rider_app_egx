@@ -3,11 +3,14 @@
 import { useRiderSession } from '@/hooks/useRiderSession'
 import { useState, useRef } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import {
   Power, MapPin, Phone, Navigation,
-  Package, CheckCircle, Loader2, ChevronRight, Clock, AlertCircle, History,
-  Camera, X, Volume2, VolumeX,
+  Package, CheckCircle, Loader2, ChevronRight, Clock, AlertCircle, History, Wallet,
+  Camera, X, Volume2, VolumeX, KeyRound, MessageCircle,
 } from 'lucide-react'
+
+const ChatFAB = dynamic(() => import('@/components/chat/ChatFAB'), { ssr: false })
 
 const ORDER_STEPS: Record<string, { label: string; next: string; nextLabel: string; color: string }> = {
   assigned:          { label: 'Pedido asignado',        next: 'heading_to_pickup', nextLabel: '🛵  Salir a recoger',    color: 'bg-blue-600' },
@@ -36,7 +39,33 @@ export default function RiderDashboard({ riderId, name }: Props) {
   const [photoFile, setPhotoFile]     = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [uploading, setUploading]     = useState(false)
+  const [pinInput, setPinInput]       = useState('')
+  const [pinStatus, setPinStatus]     = useState<'idle' | 'verifying' | 'verified' | 'error'>('idle')
+  const [pinError, setPinError]       = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleVerifyPin = async () => {
+    if (!activeOrder || pinInput.length !== 4) return
+    setPinStatus('verifying')
+    setPinError('')
+    try {
+      const res = await fetch(`/api/orders/${activeOrder.id}/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinInput }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setPinStatus('verified')
+      } else {
+        setPinStatus('error')
+        setPinError(data.error || 'PIN incorrecto')
+      }
+    } catch {
+      setPinStatus('error')
+      setPinError('Error de conexión')
+    }
+  }
 
   const handleDeliveryConfirm = async () => {
     if (!activeOrder) return
@@ -100,6 +129,13 @@ export default function RiderDashboard({ riderId, name }: Props) {
               : <VolumeX className="w-4 h-4" />
             }
           </button>
+          <Link
+            href="/rider/wallet"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors"
+          >
+            <Wallet className="w-4 h-4" />
+            Wallet
+          </Link>
           <Link
             href="/rider/history"
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors"
@@ -186,6 +222,42 @@ export default function RiderDashboard({ riderId, name }: Props) {
                 <Navigation className="w-4 h-4" />
                 Navegar
               </a>
+
+              {/* PIN de verificación — mostrar al recoger o entregar */}
+              {activeOrder.status === 'in_transit' && pinStatus !== 'verified' && (
+                <div className="bg-zinc-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-amber-400" />
+                    <p className="text-amber-400 text-sm font-semibold">Verificar PIN del cliente</p>
+                  </div>
+                  <p className="text-zinc-400 text-xs">Pide al cliente el PIN de 4 dígitos</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={pinInput}
+                      onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setPinStatus('idle'); setPinError('') }}
+                      placeholder="0000"
+                      className="flex-1 bg-zinc-700 border border-zinc-600 text-white text-center text-2xl font-bold tracking-[0.5em] rounded-xl px-4 py-3 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                    />
+                    <button
+                      onClick={handleVerifyPin}
+                      disabled={pinInput.length !== 4 || pinStatus === 'verifying'}
+                      className="px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white font-semibold text-sm transition-colors"
+                    >
+                      {pinStatus === 'verifying' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verificar'}
+                    </button>
+                  </div>
+                  {pinError && <p className="text-red-400 text-xs">{pinError}</p>}
+                </div>
+              )}
+              {pinStatus === 'verified' && (
+                <div className="bg-emerald-900/40 border border-emerald-700 rounded-xl px-4 py-3 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <p className="text-emerald-400 text-sm font-medium">PIN verificado correctamente</p>
+                </div>
+              )}
 
               {/* Avanzar estado — en in_transit pide foto */}
               {activeOrder.status === 'in_transit' ? (
@@ -350,6 +422,15 @@ export default function RiderDashboard({ riderId, name }: Props) {
           </div>
         )}
       </div>
+
+      {/* Chat FAB — solo visible con pedido activo */}
+      {activeOrder && (
+        <ChatFAB
+          orderId={activeOrder.id}
+          currentUserId={riderId}
+          currentUserRole="rider"
+        />
+      )}
     </div>
   )
 }

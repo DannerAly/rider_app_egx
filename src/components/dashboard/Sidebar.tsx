@@ -4,19 +4,22 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Users, Map,
-  BarChart2, Settings, Package2,
+  BarChart2, Settings, Package2, Store, DollarSign, Ticket,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 
-type UserRole = 'admin' | 'dispatcher' | 'rider' | 'customer'
+type UserRole = 'admin' | 'dispatcher' | 'rider' | 'customer' | 'merchant'
 
 const ADMIN_NAV = [
-  { href: '/admin',         label: 'Resumen',  icon: LayoutDashboard, exact: true },
-  { href: '/admin/orders',  label: 'Pedidos',  icon: Package },
-  { href: '/admin/riders',  label: 'Riders',   icon: Users },
-  { href: '/admin/zones',   label: 'Zonas',    icon: Map },
-  { href: '/admin/reports', label: 'Reportes', icon: BarChart2 },
+  { href: '/admin',            label: 'Resumen',    icon: LayoutDashboard, exact: true },
+  { href: '/admin/orders',     label: 'Pedidos',    icon: Package },
+  { href: '/admin/riders',     label: 'Riders',     icon: Users },
+  { href: '/admin/merchants',  label: 'Comercios',  icon: Store },
+  { href: '/admin/zones',      label: 'Zonas',      icon: Map },
+  { href: '/admin/reports',    label: 'Reportes',   icon: BarChart2 },
+  { href: '/admin/finance',    label: 'Finanzas',   icon: DollarSign },
+  { href: '/admin/coupons',    label: 'Cupones',    icon: Ticket },
 ]
 
 const DISPATCHER_NAV = [

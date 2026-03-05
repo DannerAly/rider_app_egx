@@ -1,6 +1,18 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// Rutas que NO requieren autenticación
+const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/track', '/unauthorized']
+
+// Mapeo de rol → ruta home
+const ROLE_HOME: Record<string, string> = {
+  admin:      '/admin',
+  dispatcher: '/dispatcher',
+  rider:      '/rider',
+  customer:   '/customer',
+  merchant:   '/merchant',
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -28,16 +40,32 @@ export async function proxy(request: NextRequest) {
 
   const path = request.nextUrl.pathname
 
-  // Rutas públicas
-  const publicPaths = ['/login', '/register', '/track', '/unauthorized']
-  if (publicPaths.some(p => path.startsWith(p))) return supabaseResponse
+  // ── Rutas públicas ──
+  const isPublicPath = PUBLIC_PATHS.some(p => path.startsWith(p))
 
-  // Sin sesión → login
-  if (!user) {
-    return NextResponse.redirect(new URL('/login', request.url))
+  if (isPublicPath) {
+    // Si ya está autenticado y va a login/register, redirigir a su home
+    if (user && (path === '/login' || path === '/register')) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      const home = ROLE_HOME[profile?.role ?? 'customer'] ?? '/customer'
+      return NextResponse.redirect(new URL(home, request.url))
+    }
+    return supabaseResponse
   }
 
-  // Obtener rol
+  // ── Sin sesión → login ──
+  if (!user) {
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('redirect', path)
+    return NextResponse.redirect(loginUrl)
+  }
+
+  // ── Obtener rol ──
   const { data: profile } = await supabase
     .from('profiles')
     .select('role')
@@ -46,7 +74,15 @@ export async function proxy(request: NextRequest) {
 
   const role = profile?.role as string | undefined
 
-  // Proteger rutas por rol
+  // Ruta raíz → home del rol
+  if (path === '/') {
+    return NextResponse.redirect(new URL(ROLE_HOME[role ?? 'customer'] ?? '/customer', request.url))
+  }
+
+  // ── Proteger rutas por rol ──
+  // Admin tiene acceso a todo
+  if (role === 'admin') return supabaseResponse
+
   if (path.startsWith('/admin') && role !== 'admin') {
     return NextResponse.redirect(new URL('/unauthorized', request.url))
   }
@@ -56,10 +92,13 @@ export async function proxy(request: NextRequest) {
   if (path.startsWith('/rider') && role !== 'rider') {
     return NextResponse.redirect(new URL('/unauthorized', request.url))
   }
+  if (path.startsWith('/merchant') && role !== 'merchant') {
+    return NextResponse.redirect(new URL('/unauthorized', request.url))
+  }
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|.*\\.svg).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|manifest\\.json|icons/|sw\\.js|api/|.*\\..*).*)',],
 }

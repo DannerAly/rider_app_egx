@@ -1,192 +1,238 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-import {
-  Package, Search, Loader2, MapPin, Clock, CheckCircle,
-  Truck, XCircle, ArrowRight, Phone,
-} from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Search, MapPin, Star, Clock, Store, Loader2, ChevronRight, LogOut, ShoppingBag, Package } from 'lucide-react'
+import { useCart } from '@/hooks/useCart'
+import CartFAB from '@/components/customer/CartFAB'
+import CartDrawer from '@/components/customer/CartDrawer'
+import { createClient } from '@/lib/supabase/client'
+import { cn } from '@/lib/utils'
 
-const STATUS_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string; bg: string }> = {
-  pending:           { label: 'Pendiente',       icon: Clock,       color: 'text-amber-600',   bg: 'bg-amber-50 border-amber-200' },
-  assigned:          { label: 'Asignado',        icon: Package,     color: 'text-blue-600',    bg: 'bg-blue-50 border-blue-200' },
-  heading_to_pickup: { label: 'Hacia recogida',  icon: Truck,       color: 'text-purple-600',  bg: 'bg-purple-50 border-purple-200' },
-  picked_up:         { label: 'Recogido',        icon: Package,     color: 'text-indigo-600',  bg: 'bg-indigo-50 border-indigo-200' },
-  in_transit:        { label: 'En camino',       icon: Truck,       color: 'text-cyan-600',    bg: 'bg-cyan-50 border-cyan-200' },
-  delivered:         { label: 'Entregado',       icon: CheckCircle, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
-  cancelled:         { label: 'Cancelado',       icon: XCircle,     color: 'text-red-600',     bg: 'bg-red-50 border-red-200' },
-  failed:            { label: 'Fallido',         icon: XCircle,     color: 'text-red-600',     bg: 'bg-red-50 border-red-200' },
+interface MerchantCategory {
+  id: string; name: string; slug: string; icon: string
+}
+interface Merchant {
+  id: string; name: string; slug: string; description: string | null
+  logo_url: string | null; banner_url: string | null
+  address: string; lat: number; lng: number
+  rating: number; total_orders: number; avg_prep_time_min: number
+  min_order_amount: number; is_featured: boolean
+  distance_km?: number
+  merchant_categories: MerchantCategory | null
 }
 
-interface Order {
-  id: string
-  order_number: string
-  status: string
-  tracking_code: string
-  pickup_address: string
-  delivery_address: string
-  delivery_contact_name: string | null
-  total_fee: number
-  created_at: string
-  delivered_at: string | null
-  delivery_photo_url: string | null
-}
+export default function CustomerHome() {
+  const router = useRouter()
+  const supabase = createClient()
+  const { cart, itemCount, subtotal, updateQuantity, removeItem, clearCart } = useCart()
 
-export default function CustomerPortal() {
-  const [phone, setPhone]       = useState('')
-  const [orders, setOrders]     = useState<Order[]>([])
-  const [loading, setLoading]   = useState(false)
-  const [searched, setSearched] = useState(false)
+  const [merchants, setMerchants] = useState<Merchant[]>([])
+  const [categories, setCategories] = useState<MerchantCategory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [activeCategory, setActiveCategory] = useState<string>('')
+  const [showCart, setShowCart] = useState(false)
+  const [userName, setUserName] = useState('')
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!phone.trim()) return
+  useEffect(() => {
+    loadUser()
+    fetchMerchants()
+  }, [])
+
+  const loadUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { data } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+      setUserName(data?.full_name ?? '')
+    }
+  }
+
+  const fetchMerchants = async (catId?: string, q?: string) => {
     setLoading(true)
-    setSearched(true)
-    try {
-      const res = await fetch(`/api/customer/orders?phone=${encodeURIComponent(phone.trim())}`)
+    const params = new URLSearchParams()
+    if (catId) params.set('category', catId)
+    if (q) params.set('search', q)
+
+    // Intentar obtener ubicación del usuario
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          params.set('lat', String(pos.coords.latitude))
+          params.set('lng', String(pos.coords.longitude))
+          const res = await fetch(`/api/customer/merchants?${params}`)
+          const json = await res.json()
+          setMerchants(json.data ?? [])
+          setCategories(json.categories ?? [])
+          setLoading(false)
+        },
+        async () => {
+          const res = await fetch(`/api/customer/merchants?${params}`)
+          const json = await res.json()
+          setMerchants(json.data ?? [])
+          setCategories(json.categories ?? [])
+          setLoading(false)
+        },
+        { timeout: 3000 }
+      )
+    } else {
+      const res = await fetch(`/api/customer/merchants?${params}`)
       const json = await res.json()
-      setOrders(json.data ?? [])
-    } finally {
+      setMerchants(json.data ?? [])
+      setCategories(json.categories ?? [])
       setLoading(false)
     }
   }
 
-  const activeOrders    = orders.filter(o => !['delivered', 'cancelled', 'failed'].includes(o.status))
-  const completedOrders = orders.filter(o => ['delivered', 'cancelled', 'failed'].includes(o.status))
+  const handleCategoryFilter = (catId: string) => {
+    const next = activeCategory === catId ? '' : catId
+    setActiveCategory(next)
+    fetchMerchants(next, search)
+  }
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    fetchMerchants(activeCategory, search)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
+
+  const firstName = userName.split(' ')[0] || 'Cliente'
 
   return (
     <div className="min-h-screen bg-zinc-50">
       {/* Header */}
-      <div className="bg-white border-b border-zinc-200">
-        <div className="max-w-lg mx-auto px-5 py-8 text-center">
-          <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-4">
-            <Package className="w-7 h-7 text-white" />
+      <div className="bg-white border-b border-zinc-100 sticky top-0 z-30">
+        <div className="max-w-lg mx-auto px-5 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-zinc-400 text-xs">Hola,</p>
+              <p className="text-zinc-900 font-bold text-lg">{firstName}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => router.push('/customer/orders')} className="w-9 h-9 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-500 hover:bg-zinc-200">
+                <Package className="w-4 h-4" />
+              </button>
+              <button onClick={handleLogout} className="w-9 h-9 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-500 hover:bg-zinc-200">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-          <h1 className="text-xl font-bold text-zinc-900">Mis Pedidos</h1>
-          <p className="text-zinc-500 text-sm mt-1">Ingresa tu teléfono para ver tus entregas</p>
+
+          {/* Search */}
+          <form onSubmit={handleSearch} className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar restaurantes, tiendas..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-100 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            />
+          </form>
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-5 py-6 space-y-5">
-        {/* Buscador */}
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <div className="relative flex-1">
-            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-            <input
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="+591 700 00000"
-              className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 bg-white text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:border-blue-500"
-            />
+      <div className="max-w-lg mx-auto px-5 py-5 space-y-5">
+        {/* Categorías */}
+        {categories.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
+            {categories.map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => handleCategoryFilter(cat.id)}
+                className={cn(
+                  'flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition-colors',
+                  activeCategory === cat.id
+                    ? 'bg-zinc-900 text-white border-zinc-900'
+                    : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'
+                )}
+              >
+                {cat.name}
+              </button>
+            ))}
           </div>
-          <button
-            type="submit"
-            disabled={loading || !phone.trim()}
-            className="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-2 transition-colors"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-            Buscar
-          </button>
-        </form>
+        )}
 
-        {/* Resultados */}
+        {/* Merchants */}
         {loading ? (
-          <div className="flex justify-center py-12">
+          <div className="flex justify-center py-16">
             <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
           </div>
-        ) : searched && orders.length === 0 ? (
-          <div className="text-center py-12">
-            <MapPin className="w-10 h-10 text-zinc-300 mx-auto mb-3" />
-            <p className="text-zinc-500 font-medium">No se encontraron pedidos</p>
-            <p className="text-zinc-400 text-sm mt-1">Verifica el número ingresado</p>
+        ) : merchants.length > 0 ? (
+          <div className="space-y-3">
+            {merchants.map(m => (
+              <button
+                key={m.id}
+                onClick={() => router.push(`/customer/restaurants/${m.id}`)}
+                className="w-full bg-white rounded-xl border border-zinc-200 p-4 text-left hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center flex-shrink-0">
+                    <Store className="w-6 h-6 text-orange-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-zinc-900 font-semibold text-sm truncate">{m.name}</p>
+                      {m.is_featured && (
+                        <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium ml-2 flex-shrink-0">
+                          Destacado
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-zinc-400 text-xs mt-0.5">
+                      {m.merchant_categories?.name ?? 'Comercio'}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-zinc-500">
+                      <span className="flex items-center gap-1">
+                        <Star className="w-3 h-3 text-amber-500" />
+                        {Number(m.rating).toFixed(1)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {m.avg_prep_time_min} min
+                      </span>
+                      {m.distance_km !== undefined && (
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {m.distance_km.toFixed(1)} km
+                        </span>
+                      )}
+                      {m.min_order_amount > 0 && (
+                        <span>Min. Bs. {m.min_order_amount}</span>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-zinc-300 mt-1 flex-shrink-0" />
+                </div>
+              </button>
+            ))}
           </div>
         ) : (
-          <>
-            {/* Pedidos activos */}
-            {activeOrders.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-700 mb-3">En curso ({activeOrders.length})</h2>
-                <div className="space-y-3">
-                  {activeOrders.map(order => (
-                    <OrderCard key={order.id} order={order} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Historial */}
-            {completedOrders.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-700 mb-3">Historial ({completedOrders.length})</h2>
-                <div className="space-y-3">
-                  {completedOrders.map(order => (
-                    <OrderCard key={order.id} order={order} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
+          <div className="text-center py-16">
+            <Store className="w-12 h-12 text-zinc-300 mx-auto mb-3" />
+            <p className="text-zinc-500 font-medium">No hay comercios disponibles</p>
+            <p className="text-zinc-400 text-sm mt-1">Intenta con otra categoría o búsqueda</p>
+          </div>
         )}
       </div>
-    </div>
-  )
-}
 
-function OrderCard({ order }: { order: Order }) {
-  const config = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.pending
-  const Icon = config.icon
+      {/* Cart FAB */}
+      <CartFAB itemCount={itemCount} subtotal={subtotal} onClick={() => setShowCart(true)} />
 
-  return (
-    <div className="bg-white rounded-xl border border-zinc-200 p-4 hover:shadow-sm transition-shadow">
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <p className="text-xs text-zinc-400 font-mono">{order.order_number}</p>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            {new Date(order.created_at).toLocaleDateString('es', {
-              day: '2-digit', month: 'short', year: 'numeric',
-            })}
-          </p>
-        </div>
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${config.bg} ${config.color}`}>
-          <Icon className="w-3 h-3" />
-          {config.label}
-        </span>
-      </div>
-
-      <div className="space-y-1.5 mb-3">
-        <div className="flex gap-2 items-start">
-          <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0" />
-          <p className="text-sm text-zinc-600 line-clamp-1">{order.pickup_address}</p>
-        </div>
-        <div className="flex gap-2 items-start">
-          <div className="w-2 h-2 rounded-full bg-green-500 mt-1.5 flex-shrink-0" />
-          <p className="text-sm text-zinc-600 line-clamp-1">{order.delivery_address}</p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-zinc-800">Bs. {Number(order.total_fee).toFixed(2)}</span>
-        <Link
-          href={`/track/${order.tracking_code}`}
-          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
-        >
-          Ver tracking <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
-      </div>
-
-      {/* Foto de entrega si existe */}
-      {order.delivery_photo_url && (
-        <div className="mt-3 pt-3 border-t border-zinc-100">
-          <p className="text-xs text-zinc-400 mb-2">Foto de entrega</p>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={order.delivery_photo_url}
-            alt="Foto de entrega"
-            className="w-full h-32 object-cover rounded-lg"
-          />
-        </div>
+      {/* Cart Drawer */}
+      {showCart && cart && (
+        <CartDrawer
+          cart={cart}
+          subtotal={subtotal}
+          onClose={() => setShowCart(false)}
+          onUpdateQuantity={updateQuantity}
+          onRemove={removeItem}
+          onClear={clearCart}
+          onCheckout={() => { setShowCart(false); router.push('/customer/checkout') }}
+        />
       )}
     </div>
   )

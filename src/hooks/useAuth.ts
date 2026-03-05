@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 
-type UserRole = 'admin' | 'dispatcher' | 'rider' | 'customer'
+type UserRole = 'admin' | 'dispatcher' | 'rider' | 'customer' | 'merchant'
 
 interface Profile {
   id: string
