@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Rutas que NO requieren autenticación
-const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/track', '/unauthorized', '/auth/callback']
+const PUBLIC_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/track', '/unauthorized', '/auth/callback', '/verify-phone']
 
 // Mapeo de rol → ruta home
 const ROLE_HOME: Record<string, string> = {
@@ -48,9 +48,13 @@ export async function proxy(request: NextRequest) {
     if (user && (path === '/login' || path === '/register')) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('*')
         .eq('id', user.id)
         .single()
+
+      if (profile && profile.phone_verified === false) {
+        return NextResponse.redirect(new URL('/verify-phone', request.url))
+      }
 
       const home = ROLE_HOME[profile?.role ?? 'customer'] ?? '/customer'
       return NextResponse.redirect(new URL(home, request.url))
@@ -68,11 +72,17 @@ export async function proxy(request: NextRequest) {
   // ── Obtener rol ──
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('*')
     .eq('id', user.id)
     .single()
 
   const role = profile?.role as string | undefined
+
+  // ── Phone verification gate ──
+  // phone_verified === false (strict): si la columna no existe (undefined), no bloquea
+  if (profile && profile.phone_verified === false && path !== '/verify-phone') {
+    return NextResponse.redirect(new URL('/verify-phone', request.url))
+  }
 
   // Ruta raíz → home del rol
   if (path === '/') {

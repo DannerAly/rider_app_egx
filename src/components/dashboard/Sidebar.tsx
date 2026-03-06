@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Users, Map,
-  BarChart2, Settings, Package2, Store, DollarSign, Ticket,
+  BarChart2, Settings, Package2, Store, DollarSign, Ticket, UserCog,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
@@ -16,6 +16,7 @@ const ADMIN_NAV = [
   { href: '/admin/orders',     label: 'Pedidos',    icon: Package },
   { href: '/admin/riders',     label: 'Riders',     icon: Users },
   { href: '/admin/merchants',  label: 'Comercios',  icon: Store },
+  { href: '/admin/users',      label: 'Usuarios',   icon: UserCog },
   { href: '/admin/zones',      label: 'Zonas',      icon: Map },
   { href: '/admin/reports',    label: 'Reportes',   icon: BarChart2 },
   { href: '/admin/finance',    label: 'Finanzas',   icon: DollarSign },
