@@ -69,16 +69,16 @@ export async function GET(request: Request) {
       phone: user.phone ?? null,
     })
 
-    return NextResponse.redirect(`${origin}/verify-phone`)
+    const ROLE_HOME: Record<string, string> = {
+      admin: '/admin', dispatcher: '/dispatcher', rider: '/rider',
+      customer: '/customer', merchant: '/merchant',
+    }
+    return NextResponse.redirect(`${origin}${ROLE_HOME['customer'] ?? '/customer'}`)
   }
 
   const ROLE_HOME: Record<string, string> = {
     admin: '/admin', dispatcher: '/dispatcher', rider: '/rider',
     customer: '/customer', merchant: '/merchant',
-  }
-
-  if (profile.phone_verified === false) {
-    return NextResponse.redirect(`${origin}/verify-phone`)
   }
 
   return NextResponse.redirect(`${origin}${ROLE_HOME[profile.role] ?? '/customer'}`)

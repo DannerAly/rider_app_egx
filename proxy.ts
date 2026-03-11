@@ -52,10 +52,6 @@ export async function proxy(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      if (profile && profile.phone_verified === false) {
-        return NextResponse.redirect(new URL('/verify-phone', request.url))
-      }
-
       const home = ROLE_HOME[profile?.role ?? 'customer'] ?? '/customer'
       return NextResponse.redirect(new URL(home, request.url))
     }
@@ -77,12 +73,6 @@ export async function proxy(request: NextRequest) {
     .single()
 
   const role = profile?.role as string | undefined
-
-  // ── Phone verification gate ──
-  // phone_verified === false (strict): si la columna no existe (undefined), no bloquea
-  if (profile && profile.phone_verified === false && path !== '/verify-phone') {
-    return NextResponse.redirect(new URL('/verify-phone', request.url))
-  }
 
   // Ruta raíz → home del rol
   if (path === '/') {
