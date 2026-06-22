@@ -181,6 +181,37 @@
     streetLabels.push({ x: i*BLOCK, y: WORLD/2, text: streetV[i%streetV.length], angle: -Math.PI/2 });
   }
 
+  // ============================================================
+  //  ELEVACIÓN — La Paz es una hoyada: centro bajo, bordes altos
+  // ============================================================
+  function height(x,y){
+    const dc = Math.hypot(x-WORLD/2, y-WORLD/2)/(WORLD*0.62);
+    const ridges = 0.14*Math.sin(x*0.0042) + 0.14*Math.cos(y*0.0037);
+    return Math.max(0, Math.min(1, dc*0.9 + ridges + 0.1));
+  }
+  // Mapa de sombras precalculado (cheap 3D) en un canvas offscreen
+  const SHCELL = 36, SHN = Math.ceil(WORLD/SHCELL);
+  const shadeCv = document.createElement("canvas");
+  shadeCv.width = SHN; shadeCv.height = SHN;
+  (function bakeShade(){
+    const sx = shadeCv.getContext("2d");
+    const img = sx.createImageData(SHN, SHN);
+    for(let j=0;j<SHN;j++) for(let i=0;i<SHN;i++){
+      const wx=i*SHCELL, wy=j*SHCELL;
+      const h  = height(wx,wy);
+      // pendiente hacia el sol (arriba-izquierda)
+      const hx = height(wx+SHCELL,wy)-height(wx-SHCELL,wy);
+      const hy = height(wx,wy+SHCELL)-height(wx,wy-SHCELL);
+      const slope = -(hx+hy);                 // >0 cara al sol = más claro
+      let b = slope*6 + (h-0.5)*0.6;          // brillo [-,+]
+      b = Math.max(-1, Math.min(1, b));
+      const o = (j*SHN+i)*4;
+      if(b>=0){ img.data[o]=255; img.data[o+1]=255; img.data[o+2]=255; img.data[o+3]=Math.round(b*90); }
+      else    { img.data[o]=0;   img.data[o+1]=0;   img.data[o+2]=0;   img.data[o+3]=Math.round(-b*120); }
+    }
+    sx.putImageData(img,0,0);
+  })();
+
   // Teleférico (Mi Teleférico): 3 líneas con cabinas en movimiento
   const teleLines = [
     { color:"#d63b3b", a:{x:120,y:420}, b:{x:WORLD-200,y:WORLD-700}, n:6 }, // Línea Roja
@@ -195,21 +226,28 @@
   const carColors = ["#d83b3b","#2d6cdf","#e4b53a","#2fae5a","#9b59b6","#e67e22"];
   const cars = [];
   function roadCenter(i){ return i*BLOCK; }
-  function spawnCar(x,y,angle,isPlayer){
-    cars.push({ x,y,angle, speed:0, w:26, h:46,
-      color: isPlayer ? "#d83b3b" : carColors[(cars.length)%carColors.length],
-      maxSpeed:6.4, accel:0.17, reverse:-3.0, friction:0.05, turn:0.05,
+  function spawnCar(x,y,angle,isPlayer,type){
+    type = type || "car";
+    const mini = type==="minibus";
+    cars.push({ x,y,angle, speed:0,
+      type,
+      w: mini?30:26, h: mini?64:46,
+      color: mini ? "#eef1f4" : (isPlayer ? "#d83b3b" : carColors[(cars.length)%carColors.length]),
+      stripe: mini ? carColors[(cars.length)%carColors.length] : null,
+      maxSpeed: mini?5.0:6.4, accel: mini?0.13:0.17, reverse:-3.0,
+      friction:0.05, turn: mini?0.04:0.05,
       ai: !isPlayer, aiTurnCd:0 });
   }
   // Auto del jugador cerca de la plaza
   spawnCar(WORLD/2, WORLD/2 + BLOCK/2, -Math.PI/2, true);
-  // Tráfico AI sobre las avenidas
-  for(let k=0;k<9;k++){
+  // Tráfico AI sobre las avenidas (autos y minibuses paceños)
+  for(let k=0;k<11;k++){
     const onVert = Math.random()<0.5;
     const line = roadCenter(1 + Math.floor(Math.random()*(COLS-1)));
     const along = 200 + Math.random()*(WORLD-400);
-    if(onVert) spawnCar(line, along, Math.random()<0.5?Math.PI/2:-Math.PI/2, false);
-    else       spawnCar(along, line, Math.random()<0.5?0:Math.PI, false);
+    const type = Math.random()<0.4 ? "minibus" : "car";
+    if(onVert) spawnCar(line, along, Math.random()<0.5?Math.PI/2:-Math.PI/2, false, type);
+    else       spawnCar(along, line, Math.random()<0.5?0:Math.PI, false, type);
   }
 
   // Jugador a pie
@@ -262,6 +300,7 @@
   const block = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "];
   addEventListener("keydown", e=>{
     if(block.includes(e.key)) e.preventDefault();
+    ensureAudio();
     keys[e.key.toLowerCase()] = true;
     if(e.key.toLowerCase()==="e") pendingEE = true;
     if(e.key.toLowerCase()==="h") honk();
@@ -276,11 +315,31 @@
   let pendingEE = false;
   let showMinimap = true;
 
-  // Bocina (WebAudio)
-  let actx = null;
+  // ---- Audio (WebAudio): motor + bocina ----
+  let actx = null, engOsc = null, engGain = null;
+  function ensureAudio(){
+    if(actx) return;
+    try{
+      actx = new (window.AudioContext||window.webkitAudioContext)();
+      engOsc = actx.createOscillator(); engGain = actx.createGain();
+      engOsc.type = "sawtooth"; engOsc.frequency.value = 60; engGain.gain.value = 0;
+      engOsc.connect(engGain); engGain.connect(actx.destination); engOsc.start();
+    }catch(_){}
+  }
+  function updateEngine(){
+    if(!actx || !engOsc) return;
+    if(drivingIndex>=0){
+      const c = cars[drivingIndex];
+      const f = 50 + Math.abs(c.speed)*26 + (c.type==="minibus"?8:0);
+      engOsc.frequency.setTargetAtTime(f, actx.currentTime, 0.05);
+      engGain.gain.setTargetAtTime(0.018 + Math.abs(c.speed)*0.004, actx.currentTime, 0.08);
+    } else {
+      engGain.gain.setTargetAtTime(0, actx.currentTime, 0.1);
+    }
+  }
   function honk(){
     try{
-      actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+      ensureAudio();
       const o = actx.createOscillator(), g = actx.createGain();
       o.type="square"; o.frequency.value=300; g.gain.value=0.06;
       o.connect(g); g.connect(actx.destination); o.start();
@@ -372,11 +431,19 @@
   }
 
   function updateDriving(car){
+    // pendiente del terreno en la dirección de avance (cuestas de La Paz)
+    const ahead = 26;
+    const slope = height(car.x+Math.cos(car.angle)*ahead, car.y+Math.sin(car.angle)*ahead)
+                - height(car.x, car.y);
+    const gravity = -slope * 0.9;   // subida frena, bajada acelera
+
     if(K.up()) car.speed += car.accel;
     else if(K.down()) car.speed -= car.accel*1.4;
     else { car.speed += (car.speed>0?-1:1)*Math.min(Math.abs(car.speed),car.friction); }
+    car.speed += gravity;           // efecto de la cuesta
     if(K.action()) car.speed *= 0.85;
-    car.speed = Math.max(car.reverse, Math.min(car.maxSpeed, car.speed));
+    const maxUp = car.maxSpeed * (1 - Math.max(0,slope)*1.4); // tope menor cuesta arriba
+    car.speed = Math.max(car.reverse, Math.min(Math.max(1.5,maxUp), car.speed));
 
     const dir = car.speed>=0?1:-1;
     const steer = car.turn * (Math.min(Math.abs(car.speed),3)/3);
@@ -465,7 +532,15 @@
   }
 
   let frame = 0;
+  // Ciclo día/noche: 0 = mediodía, 1 = medianoche  (~80 s por ciclo)
+  function nightLevel(){
+    const t = (frame % 4800) / 4800;          // 0..1
+    return Math.max(0, Math.min(1, -Math.cos(t*Math.PI*2)*0.5 + 0.5));
+  }
+  let nf = 0;
+
   function draw(){
+    nf = nightLevel();
     const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
     const camX = ent.x - canvas.width/2;
     const camY = ent.y - canvas.height/2;
@@ -504,6 +579,10 @@
     }
     ctx.stroke(); ctx.setLineDash([]);
 
+    // sombreado de relieve (cuestas) — overlay suave del mapa de alturas
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(shadeCv, 0,0,SHN,SHN, 0,0, SHN*SHCELL, SHN*SHCELL);
+
     // nombres de avenidas
     ctx.fillStyle = "rgba(255,255,255,0.12)";
     ctx.font = "bold 16px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -538,7 +617,11 @@
       const padW=10, gw=(b.w-padW*2)/b.cols, gh=(b.h-padW*2)/b.rows;
       for(let i=0;i<b.cols;i++) for(let j=0;j<b.rows;j++){
         const lit = ((b.seed + i*3 + j*7) % 5)===0;
-        ctx.fillStyle = lit ? "rgba(255,225,150,0.85)" : "rgba(40,55,75,0.7)";
+        // de noche se encienden más ventanas y brillan más
+        const on = lit || (nf>0.45 && ((b.seed + i*5 + j*3) % 3)===0);
+        ctx.fillStyle = on
+          ? `rgba(255,225,150,${0.55 + nf*0.4})`
+          : "rgba(40,55,75,0.7)";
         ctx.fillRect(b.x+padW+i*gw+gw*0.2, b.y+padW+j*gh+gh*0.2, gw*0.6, gh*0.55);
       }
       // tanques de agua negros (Tigre) en el techo
@@ -597,6 +680,23 @@
       ctx.fillStyle="#e8c9a0"; ctx.beginPath(); ctx.arc(p.x,p.y-2,3.2,0,Math.PI*2); ctx.fill();
     }
 
+    // ===== capa de noche =====
+    if(nf>0.02){
+      ctx.fillStyle = `rgba(12,18,45,${nf*0.62})`;
+      ctx.fillRect(camX, camY, view.w, view.h);
+    }
+
+    // faros de los vehículos (de noche)
+    if(nf>0.22){
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      for(let i=0;i<cars.length;i++){
+        const c = cars[i];
+        if(!vis(c.x,c.y,160)) continue;
+        drawHeadlights(c);
+      }
+      ctx.restore();
+    }
+
     // autos
     for(let i=0;i<cars.length;i++){
       const c = cars[i];
@@ -611,6 +711,7 @@
 
     // HUD dinámico
     drawHud(ent);
+    updateEngine();
     if(showMinimap) drawMinimap();
     frame++;
     requestAnimationFrame(draw);
@@ -621,12 +722,44 @@
     ctx.translate(c.x, c.y); ctx.rotate(c.angle + Math.PI/2);
     ctx.fillStyle="rgba(0,0,0,0.35)"; ctx.fillRect(-c.w/2+3,-c.h/2+4,c.w,c.h);
     ctx.fillStyle=c.color; roundRect(-c.w/2,-c.h/2,c.w,c.h,6); ctx.fill();
-    ctx.fillStyle="#bfe3ff"; ctx.fillRect(-c.w/2+4,-c.h/2+7,c.w-8,11);
-    ctx.fillStyle="#9fc6e0"; ctx.fillRect(-c.w/2+4,c.h/2-16,c.w-8,9);
-    if(isPlayer){ // techo claro para distinguir
-      ctx.fillStyle="rgba(255,255,255,0.25)"; ctx.fillRect(-c.w/2+6,-3,c.w-12,8);
+
+    if(c.type==="minibus"){
+      // franja de color a lo largo del minibús
+      ctx.fillStyle=c.stripe; ctx.fillRect(-c.w/2, -c.h*0.18, c.w, 6);
+      // parabrisas + ventanillas laterales
+      ctx.fillStyle="#bfe3ff"; ctx.fillRect(-c.w/2+4,-c.h/2+6,c.w-8,9);
+      ctx.fillStyle="rgba(150,200,230,0.85)";
+      for(let k=0;k<4;k++) ctx.fillRect(-c.w/2+3, -c.h/2+22+k*11, 4, 8);
+      for(let k=0;k<4;k++) ctx.fillRect(c.w/2-7, -c.h/2+22+k*11, 4, 8);
+    } else {
+      ctx.fillStyle="#bfe3ff"; ctx.fillRect(-c.w/2+4,-c.h/2+7,c.w-8,11);
+      ctx.fillStyle="#9fc6e0"; ctx.fillRect(-c.w/2+4,c.h/2-16,c.w-8,9);
     }
+
+    if(isPlayer){ // marca para distinguir el vehículo del jugador
+      ctx.fillStyle="rgba(255,80,80,0.9)"; ctx.beginPath();
+      ctx.arc(0,-c.h/2-7,3.5,0,Math.PI*2); ctx.fill();
+    }
+    // luces traseras
+    ctx.fillStyle = nf>0.3 ? "#ff5a4a" : "rgba(150,30,20,0.8)";
+    ctx.fillRect(-c.w/2+3, c.h/2-3, 5, 3);
+    ctx.fillRect(c.w/2-8, c.h/2-3, 5, 3);
     ctx.restore();
+  }
+
+  // Conos de luz hacia adelante (se llaman bajo composite 'lighter')
+  function drawHeadlights(c){
+    const len = 150, spread = 0.32, intensity = 0.55*nf;
+    for(const s of [-1,1]){
+      const ox = c.x + Math.cos(c.angle)*(c.h/2) + Math.cos(c.angle+Math.PI/2)*s*(c.w*0.32);
+      const oy = c.y + Math.sin(c.angle)*(c.h/2) + Math.sin(c.angle+Math.PI/2)*s*(c.w*0.32);
+      const g = ctx.createRadialGradient(ox,oy,4, ox,oy,len);
+      g.addColorStop(0, `rgba(255,240,185,${intensity})`);
+      g.addColorStop(1, "rgba(255,240,185,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.moveTo(ox,oy);
+      ctx.arc(ox,oy,len, c.angle-spread, c.angle+spread); ctx.closePath(); ctx.fill();
+    }
   }
 
   function drawPlayer(){
@@ -645,7 +778,11 @@
       drivingIndex>=0 ? Math.round(Math.abs(cars[drivingIndex].speed)*18) : Math.round(player.speed*12);
     document.getElementById("cash").textContent = cash;
     document.getElementById("stars").textContent = wanted>0 ? "★".repeat(wanted) : "—";
-    document.getElementById("mode").textContent = drivingIndex>=0 ? "🚗 Conduciendo" : "🚶 A pie";
+    const tod = nf>0.55 ? "🌙 Noche" : nf>0.3 ? "🌆 Atardecer" : "☀️ Día";
+    const veh = drivingIndex>=0
+      ? (cars[drivingIndex].type==="minibus" ? "🚐 Minibús" : "🚗 Conduciendo")
+      : "🚶 A pie";
+    document.getElementById("mode").textContent = `${veh}  ·  ${tod}`;
     const dist = (()=>{
       const t = mission.stage==="pickup"?mission.from:mission.to;
       if(!t) return 0;
