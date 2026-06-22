@@ -347,7 +347,7 @@
       stripe: mini ? carColors[(cars.length)%carColors.length] : null,
       maxSpeed: mini?5.0:6.4, accel: mini?0.13:0.17, reverse:-3.0,
       friction:0.05, turn: mini?0.04:0.05,
-      ai: !isPlayer, aiTurnCd:0,
+      ai: !isPlayer, aiTurnCd:0, kx:0, ky:0, spinV:0,
       fuel: 100, hp: 100, wrecked: false });
   }
   // Auto del jugador cerca de la plaza
@@ -491,13 +491,17 @@
       y = 60 + Math.random()*(WORLD-120);
       tries++;
     } while(tries<20 && (Math.hypot(x-ent.x,y-ent.y)<500 || hitsBuilding(x,y,18) || inWater(x,y)));
-    police.push({ x, y, angle:0, speed:0, w:27, h:48, maxSpeed:6.8, hp:100, turnCd:0 });
+    police.push({ x, y, angle:0, speed:0, w:27, h:48, maxSpeed:6.8, hp:100, turnCd:0,
+      kx:0, ky:0, spinV:0, disabled:false, disabledT:0 });
   }
   function managePolice(){
-    const target = wanted;                    // nº deseado = estrellas
-    while(police.length < target) spawnPolice();
-    if(wanted===0 && police.length){ police.length = 0; }
-    while(police.length > target) police.pop();
+    // cuenta solo las patrullas activas (las neutralizadas no cuentan)
+    let active = police.reduce((n,p)=>n+(p.disabled?0:1),0);
+    if(active < wanted && frame%30===0) spawnPolice();   // refuerzos graduales
+    // si sobran (la búsqueda bajó), se retiran
+    if(active > wanted){
+      for(const p of police){ if(!p.disabled && active>wanted){ p.disabled=true; p.disabledT=90; active--; } }
+    }
   }
 
   // ============================================================
@@ -812,11 +816,73 @@
       }
       car.vx *= -0.25; car.vy *= -0.25; car.speed = 0; driftScore = 0;
     }
+    // choques contra otros vehículos y patrullas
+    resolveVehicleCollisions(car);
+
     // atropellos
     for(const p of peds){
       if(Math.abs(car.speed)>1 && (p.x-car.x)**2+(p.y-car.y)**2 < 22*22){
         p.flee = 160; wanted = Math.min(5, wanted+1); wantedTimer=540;
       }
+    }
+  }
+
+  // radio aproximado de un vehículo
+  function rr(o){ return (o.w + o.h) / 4; }
+
+  // colisión con transferencia de momento: el jugador embiste a otros coches/patrullas
+  function resolveVehicleCollisions(car){
+    const r1 = rr(car);
+    const mineMass = car.type==="minibus" ? 1.4 : 1;
+    const targets = [];
+    for(let i=0;i<cars.length;i++) if(i!==drivingIndex && !cars[i].wrecked) targets.push({o:cars[i],police:false});
+    for(const p of police) if(!p.disabled) targets.push({o:p,police:true});
+
+    for(const it of targets){
+      const o = it.o;
+      const dx = o.x-car.x, dy = o.y-car.y;
+      let d = Math.hypot(dx,dy); if(d<0.001) d = 0.001;
+      const minD = r1 + rr(o);
+      if(d >= minD) continue;
+
+      const nx = dx/d, ny = dy/d, overlap = minD - d;
+      // separar (el otro cede más)
+      o.x += nx*overlap*0.6;  o.y += ny*overlap*0.6;
+      car.x -= nx*overlap*0.4; car.y -= ny*overlap*0.4;
+
+      // velocidad del jugador proyectada sobre la normal (acercándose)
+      const vn = car.vx*nx + car.vy*ny;
+      if(vn <= 0) continue;
+      const force = vn * mineMass;
+      // empuje al otro + giro (trompo)
+      o.kx += nx*force*1.15; o.ky += ny*force*1.15;
+      const tang = car.vx*(-ny) + car.vy*nx;       // componente tangencial -> sentido del giro
+      o.spinV += (tang>0?1:-1) * Math.min(0.5, force*0.05) + (Math.random()-0.5)*0.05;
+      // rebote del jugador
+      car.vx -= nx*force*0.5; car.vy -= ny*force*0.5;
+      car.speed = car.vx*Math.cos(car.angle)+car.vy*Math.sin(car.angle);
+
+      if(force > 2){      // impacto fuerte: chispas, shake, sonido y daño
+        cam.shake = Math.max(cam.shake, Math.min(13, force*2));
+        burst((car.x+o.x)/2, (car.y+o.y)/2, 9, "#ffd27f", force*0.5, 22);
+        sfx("crash");
+        damageCar(car, force*1.2);                 // tu auto también se abolla
+        if(it.police) damagePolice(o, force*10);
+      }
+    }
+  }
+
+  function damagePolice(p, dmg){
+    if(p.disabled) return;
+    p.hp -= dmg;
+    if(p.hp <= 0){
+      p.disabled = true; p.disabledT = 240;
+      p.spinV += (Math.random()<0.5?-1:1)*0.6;
+      burst(p.x, p.y, 28, "#ff7033", 5, 42); sfx("crash");
+      cam.shake = Math.max(cam.shake, 15);
+      if(wanted>0){ wanted = Math.max(0, wanted-1); wantedTimer = 540; }
+      addScore(150);
+      toast("🚔💥 ¡Patrulla fuera de combate! +150");
     }
   }
 
@@ -895,11 +961,25 @@
     }
   }
 
+  // aplica empuje (knockback) y giro tras un impacto; devuelve true si sigue moviéndose por inercia
+  function applyKnockback(o){
+    if(Math.abs(o.kx)>0.05 || Math.abs(o.ky)>0.05){
+      const nx = o.x+o.kx, ny = o.y+o.ky;
+      if(!hitsBuilding(nx,ny,18) && !inWater(nx,ny) && nx>20 && nx<WORLD-20 && ny>20 && ny<WORLD-20){
+        o.x=nx; o.y=ny;
+      } else { o.kx*=-0.4; o.ky*=-0.4; }   // rebota contra muros
+      o.kx*=0.86; o.ky*=0.86;
+    }
+    if(Math.abs(o.spinV)>0.001){ o.angle += o.spinV; o.spinV*=0.9; }
+  }
+
   function updateAICars(){
     for(let i=0;i<cars.length;i++){
       if(i===drivingIndex) continue;
       const c = cars[i];
-      if(!c.ai || c.wrecked){ continue; } // estacionado o destruido
+      if(c.wrecked){ continue; }
+      applyKnockback(c);                 // recibe empujones aunque esté parado
+      if(!c.ai){ continue; }             // estacionado
       laneKeep(c);
       c.speed = stoppedByLight(c) ? 0 : 2.6;   // frena en rojo
       if(c.aiTurnCd>0) c.aiTurnCd--;
@@ -919,9 +999,16 @@
   function updatePolice(){
     const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
     let near = false;
-    for(const p of police){
+    for(let i=police.length-1;i>=0;i--){
+      const p = police[i];
+      applyKnockback(p);                 // recibe empujones del jugador
+
+      if(p.disabled){                    // neutralizada: humea y se va
+        if(--p.disabledT<=0) police.splice(i,1);
+        continue;
+      }
+
       const want = Math.atan2(ent.y-p.y, ent.x-p.x);
-      // giro suave hacia el objetivo
       let da = ((want - p.angle + Math.PI*3) % (Math.PI*2)) - Math.PI;
       p.angle += Math.max(-0.08, Math.min(0.08, da));
       const dist = Math.hypot(ent.x-p.x, ent.y-p.y);
@@ -1344,7 +1431,19 @@
     ctx.save();
     ctx.translate(p.x, p.y); ctx.rotate(p.angle + Math.PI/2);
     ctx.fillStyle="rgba(0,0,0,0.35)"; ctx.fillRect(-p.w/2+3,-p.h/2+4,p.w,p.h);
+    if(p.disabled){                       // patrulla fuera de combate: chamuscada + humo
+      ctx.fillStyle="#2a2a2e"; roundRect(-p.w/2,-p.h/2,p.w,p.h,6); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle=`rgba(90,90,90,${0.35+0.2*Math.sin(frame*0.2)})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 8+2*Math.sin(frame*0.18), 0, Math.PI*2); ctx.fill();
+      return;
+    }
     ctx.fillStyle="#1b2535"; roundRect(-p.w/2,-p.h/2,p.w,p.h,6); ctx.fill();
+    // barra de daño cuando está golpeada
+    if(p.hp<100){
+      ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(-p.w/2, -p.h/2-7, p.w, 3);
+      ctx.fillStyle = p.hp<40?"#e74c3c":"#f1c40f"; ctx.fillRect(-p.w/2, -p.h/2-7, p.w*(p.hp/100), 3);
+    }
     ctx.fillStyle="#e9edf2"; ctx.fillRect(-p.w/2,-4,p.w,10);  // puerta blanca
     ctx.fillStyle="#bfe3ff"; ctx.fillRect(-p.w/2+4,-p.h/2+7,p.w-8,11);
     // luces estroboscópicas
