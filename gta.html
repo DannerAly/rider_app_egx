@@ -11,10 +11,11 @@
   #game { display: block; }
   .panel { position: fixed; text-shadow: 0 1px 3px #000; user-select: none; pointer-events: none; }
   #hud { top: 12px; left: 12px; font-size: 14px; line-height: 1.55; }
-  #hud .big { font-size: 22px; font-weight: 700; }
-  #hud .stars { color: #ffd34d; letter-spacing: 2px; }
-  #hud .bs { color: #7CFC9A; font-weight: 700; }
-  #hud .mode { color: #9fd0ff; font-weight: 600; }
+  #hud .big { font-size: 22px; font-weight: 800; color:#36e0ff;
+    text-shadow: 0 0 8px #36e0ff, 0 0 2px #fff; }
+  #hud .stars { color: #ffd34d; letter-spacing: 2px; text-shadow:0 0 8px #ffae00; }
+  #hud .bs { color: #2bffa3; font-weight: 700; text-shadow:0 0 8px #00ff95; }
+  #hud .mode { color: #ff7ac6; font-weight: 700; text-shadow:0 0 8px #ff2d9b; }
   #bars { margin-top: 4px; }
   #bars.hidden { opacity: .35; }
   .barrow { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 13px; }
@@ -25,9 +26,11 @@
     background: rgba(0,0,0,0.45); padding: 8px 18px; border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.15); font-size: 15px; max-width: 80vw; }
   #mission b { color: #ffcf5c; }
-  #title { top: 10px; right: 16px; font-weight: 800; font-size: 18px; letter-spacing: 2px;
-    color: #f5d76e; text-align: right; }
-  #title small { display:block; font-size: 11px; letter-spacing: 3px; color:#c9a; opacity:.85; }
+  #title { top: 10px; right: 16px; font-weight: 900; font-size: 24px; letter-spacing: 3px;
+    color: #ff2d9b; text-align: right; font-style: italic;
+    text-shadow: 0 0 10px #ff2d9b, 0 0 20px #ff2d9b, 2px 2px 0 #36e0ff; }
+  #title small { display:block; font-size: 11px; letter-spacing: 4px; color:#36e0ff;
+    font-style: normal; text-shadow: 0 0 8px #36e0ff; opacity:.9; }
   #help { bottom: 10px; left: 12px; font-size: 12.5px; opacity: 0.78; line-height: 1.5; }
   #help kbd { background:#2b2b2b; border:1px solid #555; border-bottom-width:2px;
     border-radius:4px; padding:0 5px; font-size:11px; }
@@ -52,7 +55,7 @@
 </div>
 
 <div id="mission" class="panel">Cargando misión…</div>
-<div id="title" class="panel">MINI&nbsp;GTA<small>LA&nbsp;PAZ · BOLIVIA</small></div>
+<div id="title" class="panel">VICE&nbsp;PAZ<small>LA&nbsp;PAZ · 198X</small></div>
 <div id="toast" class="panel"></div>
 
 <div id="help" class="panel">
@@ -87,13 +90,51 @@
   function makeCanvas(w, h){ const c = document.createElement("canvas"); c.width=w; c.height=h; return c; }
 
   function texAsphalt(){
-    const c = makeCanvas(48,48), x = c.getContext("2d");
-    x.fillStyle = "#3b3d40"; x.fillRect(0,0,48,48);
-    for(let i=0;i<260;i++){
+    const c = makeCanvas(96,96), x = c.getContext("2d");
+    x.fillStyle = "#34373b"; x.fillRect(0,0,96,96);
+    // grano
+    for(let i=0;i<700;i++){
       const v = Math.random();
-      x.fillStyle = v>0.5 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.16)";
-      x.fillRect(Math.random()*48, Math.random()*48, 1.5, 1.5);
+      x.fillStyle = v>0.5 ? "rgba(255,255,255,0.045)" : "rgba(0,0,0,0.18)";
+      x.fillRect(Math.random()*96, Math.random()*96, 1.4, 1.4);
     }
+    // manchas de aceite
+    for(let i=0;i<3;i++){
+      const ox=Math.random()*96, oy=Math.random()*96, r=6+Math.random()*10;
+      const g=x.createRadialGradient(ox,oy,0,ox,oy,r);
+      g.addColorStop(0,"rgba(0,0,0,0.35)"); g.addColorStop(1,"rgba(0,0,0,0)");
+      x.fillStyle=g; x.beginPath(); x.arc(ox,oy,r,0,Math.PI*2); x.fill();
+    }
+    // grietas
+    x.strokeStyle="rgba(0,0,0,0.25)"; x.lineWidth=1;
+    for(let i=0;i<4;i++){
+      x.beginPath(); let px=Math.random()*96, py=Math.random()*96; x.moveTo(px,py);
+      for(let s=0;s<5;s++){ px+=(Math.random()-0.5)*22; py+=(Math.random()-0.5)*22; x.lineTo(px,py); }
+      x.stroke();
+    }
+    return ctx.createPattern(c,"repeat");
+  }
+  function texSand(){
+    const c = makeCanvas(48,48), x = c.getContext("2d");
+    x.fillStyle = "#e8d59a"; x.fillRect(0,0,48,48);
+    for(let i=0;i<260;i++){
+      const v=Math.random();
+      x.fillStyle = v>0.5 ? "rgba(255,255,255,0.25)" : "rgba(150,120,60,0.25)";
+      x.fillRect(Math.random()*48, Math.random()*48, 1.6, 1.6);
+    }
+    return ctx.createPattern(c,"repeat");
+  }
+  // muro estilo art-déco pastel (Vice City): base + bandas horizontales + zócalo
+  function texStucco(base, band){
+    const w=40, h=40, c=makeCanvas(w,h), x=c.getContext("2d");
+    x.fillStyle = base; x.fillRect(0,0,w,h);
+    // sombreado vertical sutil para dar volumen
+    const g=x.createLinearGradient(0,0,w,0);
+    g.addColorStop(0,"rgba(255,255,255,0.08)"); g.addColorStop(0.5,"rgba(0,0,0,0)"); g.addColorStop(1,"rgba(0,0,0,0.10)");
+    x.fillStyle=g; x.fillRect(0,0,w,h);
+    // bandas art-déco
+    x.fillStyle=band;
+    x.fillRect(0,6,w,3); x.fillRect(0,h-9,w,3);
     return ctx.createPattern(c,"repeat");
   }
   function texBrick(base, mortar){
@@ -116,19 +157,20 @@
   }
   function texGround(){
     const c = makeCanvas(40,40), x = c.getContext("2d");
-    x.fillStyle = "#7a6b56"; x.fillRect(0,0,40,40);     // tierra paceña
-    for(let i=0;i<140;i++){
+    x.fillStyle = "#4f8a4d"; x.fillRect(0,0,40,40);     // césped tropical
+    for(let i=0;i<160;i++){
       const v = Math.random();
-      x.fillStyle = v>0.6 ? "rgba(120,140,80,0.25)" : "rgba(0,0,0,0.12)";
+      x.fillStyle = v>0.5 ? "rgba(120,200,110,0.30)" : "rgba(20,70,30,0.30)";
       x.fillRect(Math.random()*40, Math.random()*40, 2, 2);
     }
     return ctx.createPattern(c,"repeat");
   }
   function texSidewalk(){
-    const c = makeCanvas(28,28), x = c.getContext("2d");
-    x.fillStyle = "#9a9690"; x.fillRect(0,0,28,28);
-    x.strokeStyle = "rgba(0,0,0,0.18)"; x.lineWidth=1.5;
-    x.strokeRect(0.5,0.5,27,27);
+    const c = makeCanvas(30,30), x = c.getContext("2d");
+    x.fillStyle = "#cfc7bd"; x.fillRect(0,0,30,30);   // baldosa clara Miami
+    x.strokeStyle = "rgba(0,0,0,0.14)"; x.lineWidth=1.5;
+    x.strokeRect(0.5,0.5,29,29);
+    x.fillStyle="rgba(255,255,255,0.18)"; x.fillRect(1,1,28,3);
     return ctx.createPattern(c,"repeat");
   }
 
@@ -137,21 +179,30 @@
     PAT.asphalt  = texAsphalt();
     PAT.ground   = texGround();
     PAT.sidewalk = texSidewalk();
-    PAT.brickRed   = texBrick("#9c4a35", "#5e2b1e");
-    PAT.brickOcre  = texBrick("#b5793f", "#6e4422");
-    PAT.brickGray  = texBrick("#8a8079", "#574f49");
-    PAT.painted1   = texBrick("#3f7d8c", "#274e57");  // casa pintada celeste
-    PAT.painted2   = texBrick("#c9a23f", "#8a6e22");  // casa pintada amarilla
+    PAT.sand     = texSand();
+    // paleta pastel art-déco al estilo Vice City
+    PAT.pink   = texStucco("#e98aa8", "rgba(255,255,255,0.35)");
+    PAT.teal   = texStucco("#5fc9c0", "rgba(255,255,255,0.30)");
+    PAT.peach  = texStucco("#f0a878", "rgba(255,255,255,0.30)");
+    PAT.mint   = texStucco("#9bd9ad", "rgba(255,255,255,0.30)");
+    PAT.laven  = texStucco("#b4a3e0", "rgba(255,255,255,0.30)");
+    PAT.cream  = texStucco("#efe2bd", "rgba(200,160,120,0.30)");
   }
   buildPatterns();
-  const brickKeys = ["brickRed","brickOcre","brickGray","painted1","painted2"];
+  const brickKeys = ["pink","teal","peach","mint","laven","cream"];
 
   // ============================================================
   //  GENERACIÓN DE LA CIUDAD
   // ============================================================
   const buildings = [];
+  const palms = [];
+  const neons = [];
   const centerCol = Math.floor(COLS/2), centerRow = Math.floor(COLS/2);
+  const beachRow = COLS - 1;          // última fila = playa + océano
+  const oceanY = beachRow*BLOCK + ROAD/2;
   let plaza = null;
+  const neonColors = ["#ff4fa3","#36e0ff","#ffe14f","#9b5cff","#ff7847"];
+  const neonWords  = ["MOTEL","BAR","CLUB","DINER","HOTEL","NEÓN","CAFÉ","DISCO"];
 
   for(let cx=0; cx<COLS; cx++){
     for(let cy=0; cy<COLS; cy++){
@@ -160,20 +211,30 @@
       const ix = bx + pad, iy = by + pad;
       const iw = BLOCK - ROAD, ih = BLOCK - ROAD;
 
+      if(cy===beachRow) continue;       // sin edificios en la franja de playa
+
       if(cx===centerCol && cy===centerRow){
         plaza = { x: ix+SIDEWALK, y: iy+SIDEWALK, w: iw-SIDEWALK*2, h: ih-SIDEWALK*2 };
-        continue; // Plaza Murillo: sin edificio
+        continue; // plaza central
       }
       // 1 edificio por manzana (con vereda alrededor)
       const x = ix + SIDEWALK, y = iy + SIDEWALK;
       const w = iw - SIDEWALK*2, h = ih - SIDEWALK*2;
       const key = brickKeys[(cx*7 + cy*3) % brickKeys.length];
-      // ventanas en grilla
       const cols = Math.max(2, Math.floor(w/40));
       const rows = Math.max(2, Math.floor(h/40));
       buildings.push({ x, y, w, h, pat: key, cols, rows,
         seed: (cx*31 + cy*17),
-        tanks: 1 + ((cx+cy)%3) });   // tanques de agua negros (Tigre)
+        tanks: 1 + ((cx+cy)%3) });
+      // palmeras en las esquinas de la vereda
+      palms.push({ x: ix+10, y: iy+10 }, { x: ix+iw-10, y: iy+ih-10 });
+      // letrero de neón en ~1 de cada 3 edificios
+      if((cx*5+cy*3) % 3 === 0){
+        neons.push({ x: x+w*0.5, y: y+6, w: Math.min(w*0.7,70),
+          color: neonColors[(cx+cy)%neonColors.length],
+          word: neonWords[(cx*3+cy)%neonWords.length],
+          flick: (cx*7+cy*13) });
+      }
     }
   }
 
@@ -183,8 +244,15 @@
     return { x: cx*BLOCK+pad, y: cy*BLOCK+pad, w: BLOCK-ROAD, h: BLOCK-ROAD };
   }
 
+  // Costa: línea de arena y agua en la franja de playa
+  const shoreY = beachRow*BLOCK + 40;
+  const waterY = shoreY + 90;
+  function inWater(x,y){ return y > waterY - 6; }   // el agua frena/bloquea
+  // palmeras a lo largo de la playa
+  for(let px=80; px<WORLD-80; px+=140) palms.push({ x:px, y: shoreY-18, beach:true });
+
   // Nombres de avenidas (etiquetas sobre las calles)
-  const streetH = ["Av. Mariscal Santa Cruz","El Prado","Av. 6 de Agosto","Av. Arce","Av. Camacho","Av. Buenos Aires"];
+  const streetH = ["Vice Bvld","Ocean Drive","Sunset Ave","Collins Ave","Av. 6 de Agosto","Biscayne Blvd"];
   const streetV = ["Calle Comercio","Av. Montes","Av. Illimani","Calle Sagárnaga","Av. Saavedra","Calle Jaén"];
   const streetLabels = [];
   for(let i=1;i<COLS;i++){
@@ -344,7 +412,7 @@
       x = 60 + Math.random()*(WORLD-120);
       y = 60 + Math.random()*(WORLD-120);
       tries++;
-    } while(tries<20 && (Math.hypot(x-ent.x,y-ent.y)<500 || hitsBuilding(x,y,18)));
+    } while(tries<20 && (Math.hypot(x-ent.x,y-ent.y)<500 || hitsBuilding(x,y,18) || inWater(x,y)));
     police.push({ x, y, angle:0, speed:0, w:27, h:48, maxSpeed:6.8, hp:100, turnCd:0 });
   }
   function managePolice(){
@@ -530,7 +598,7 @@
     const m = 24;
     const bx = Math.max(m, Math.min(WORLD-m, nx));
     const by = Math.max(m, Math.min(WORLD-m, ny));
-    if(!hitsBuilding(bx,by,18)){ car.x=bx; car.y=by; }
+    if(!hitsBuilding(bx,by,18) && !inWater(bx,by)){ car.x=bx; car.y=by; }
     else {
       const impact = Math.abs(car.speed);
       if(impact>3.5){ wanted=Math.min(5,wanted+1); wantedTimer=540; }
@@ -581,8 +649,8 @@
       const m=12;
       const nx = Math.max(m, Math.min(WORLD-m, player.x+vx*sp));
       const ny = Math.max(m, Math.min(WORLD-m, player.y+vy*sp));
-      if(!hitsBuilding(nx, player.y, player.r)) player.x=nx;
-      if(!hitsBuilding(player.x, ny, player.r)) player.y=ny;
+      if(!hitsBuilding(nx, player.y, player.r) && !inWater(nx, player.y)) player.x=nx;
+      if(!hitsBuilding(player.x, ny, player.r) && !inWater(player.x, ny)) player.y=ny;
       player.speed = sp;
     } else player.speed = 0;
   }
@@ -627,7 +695,7 @@
       if(c.aiTurnCd>0) c.aiTurnCd--;
       const nx = c.x + Math.cos(c.angle)*c.speed;
       const ny = c.y + Math.sin(c.angle)*c.speed;
-      if(nx<30||nx>WORLD-30||ny<30||ny>WORLD-30||hitsBuilding(nx,ny,18)){
+      if(nx<30||nx>WORLD-30||ny<30||ny>WORLD-30||hitsBuilding(nx,ny,18)||inWater(nx,ny)){
         c.angle += (Math.random()<0.5?1:-1)*Math.PI/2; // gira 90°
         c.aiTurnCd = 30;
       } else if(c.aiTurnCd===0 && Math.random()<0.01){
@@ -650,7 +718,7 @@
       p.speed = dist>70 ? p.maxSpeed : 1.5;
       const nx = p.x + Math.cos(p.angle)*p.speed;
       const ny = p.y + Math.sin(p.angle)*p.speed;
-      if(!hitsBuilding(nx,ny,18) && nx>20 && nx<WORLD-20 && ny>20 && ny<WORLD-20){
+      if(!hitsBuilding(nx,ny,18) && !inWater(nx,ny) && nx>20 && nx<WORLD-20 && ny>20 && ny<WORLD-20){
         p.x=nx; p.y=ny; p.turnCd=0;
       } else if(--p.turnCd<=0){ p.angle += (Math.random()<0.5?1:-1)*0.8; p.turnCd=20; }
 
@@ -742,9 +810,52 @@
     }
     ctx.stroke(); ctx.setLineDash([]);
 
+    // cruces peatonales (cebras) en las intersecciones
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    for(const it of intersections){
+      if(!vis(it.x,it.y,90)) continue;
+      for(let s=-1;s<=1;s+=2){
+        for(let k=-2;k<=2;k++){      // franjas horizontales (cruce N/S)
+          ctx.fillRect(it.x+k*12-4, it.y+s*(ROAD/2-12)-(s>0?0:14), 8, 14);
+        }
+        for(let k=-2;k<=2;k++){      // franjas verticales (cruce E/O)
+          ctx.fillRect(it.x+s*(ROAD/2-12)-(s>0?0:14), it.y+k*12-4, 14, 8);
+        }
+      }
+    }
+
     // sombreado de relieve (cuestas) — overlay suave del mapa de alturas
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(shadeCv, 0,0,SHN,SHN, 0,0, SHN*SHCELL, SHN*SHCELL);
+
+    // ===== PLAYA + OCÉANO (estilo Vice City) =====
+    if(camY+view.h > shoreY-20){
+      ctx.fillStyle = PAT.sand;
+      ctx.fillRect(camX, shoreY, view.w, WORLD-shoreY);
+      // mar con degradado y olas animadas
+      const og = ctx.createLinearGradient(0, waterY, 0, WORLD);
+      og.addColorStop(0, "#2bb5c9"); og.addColorStop(1, "#1a6f9e");
+      ctx.fillStyle = og;
+      ctx.fillRect(camX, waterY, view.w, WORLD-waterY);
+      // espuma en la orilla
+      ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 3;
+      ctx.beginPath();
+      for(let wx=camX-20; wx<camX+view.w+20; wx+=12){
+        const wy = waterY + Math.sin(wx*0.05 + frame*0.06)*4;
+        wx===camX-20 ? ctx.moveTo(wx,wy) : ctx.lineTo(wx,wy);
+      }
+      ctx.stroke();
+      // reflejos en el agua
+      ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth=2;
+      for(let wy=waterY+18; wy<WORLD; wy+=22){
+        ctx.beginPath();
+        for(let wx=camX-20; wx<camX+view.w+20; wx+=14){
+          const yy = wy + Math.sin(wx*0.04 + frame*0.05 + wy)*2;
+          wx===camX-20 ? ctx.moveTo(wx,yy) : ctx.lineTo(wx,yy);
+        }
+        ctx.stroke();
+      }
+    }
 
     // nombres de avenidas
     ctx.fillStyle = "rgba(255,255,255,0.12)";
@@ -793,6 +904,29 @@
         ctx.beginPath();
         ctx.arc(b.x+14+t*16, b.y+12, 5, 0, Math.PI*2); ctx.fill();
       }
+    }
+
+    // palmeras
+    for(const pm of palms){
+      if(!vis(pm.x,pm.y,30)) continue;
+      drawPalm(pm.x, pm.y);
+    }
+
+    // letreros de neón (brillan de noche)
+    for(const ne of neons){
+      if(!vis(ne.x,ne.y,60)) continue;
+      const flick = ((frame+ne.flick)%140) < 6 ? 0.4 : 1; // parpadeo ocasional
+      const glow = (0.25 + nf*0.75) * flick;
+      ctx.save();
+      ctx.shadowColor = ne.color; ctx.shadowBlur = 14*glow + 4;
+      ctx.fillStyle = "rgba(15,12,25,0.85)";
+      roundRect(ne.x-ne.w/2, ne.y-3, ne.w, 16, 3); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = ne.color; ctx.globalAlpha = glow;
+      ctx.font = "bold 11px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(ne.word, ne.x, ne.y+5);
+      ctx.globalAlpha = 1;
+      ctx.restore();
     }
 
     // Teleférico: cables + cabinas
@@ -891,6 +1025,25 @@
 
     ctx.restore();
 
+    // ===== COLOR GRADING estilo Vice City (espacio de pantalla) =====
+    // tinte cálido de atardecer (rosa/naranja arriba, turquesa abajo)
+    const warm = 0.14 + Math.max(0, 0.5 - Math.abs(nf-0.45))*0.5; // más fuerte al amanecer/atardecer
+    const grad = ctx.createLinearGradient(0,0,0,canvas.height);
+    grad.addColorStop(0, `rgba(255,120,170,${warm})`);
+    grad.addColorStop(0.5, `rgba(255,160,90,${warm*0.5})`);
+    grad.addColorStop(1, `rgba(60,200,210,${warm*0.6})`);
+    ctx.save(); ctx.globalCompositeOperation = "soft-light";
+    ctx.fillStyle = grad; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.restore();
+
+    // viñeta cinematográfica
+    const vg = ctx.createRadialGradient(
+      canvas.width/2, canvas.height/2, Math.min(canvas.width,canvas.height)*0.35,
+      canvas.width/2, canvas.height/2, Math.max(canvas.width,canvas.height)*0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.45)");
+    ctx.fillStyle = vg; ctx.fillRect(0,0,canvas.width,canvas.height);
+
     // HUD dinámico
     drawHud(ent);
     updateEngine();
@@ -905,6 +1058,23 @@
     ctx.fillStyle = col;
     const cy = state==="green" ? y+5 : state==="yellow" ? y : y-5;
     ctx.beginPath(); ctx.arc(x, cy, 2.6, 0, Math.PI*2); ctx.fill();
+  }
+
+  function drawPalm(x, y){
+    // sombra
+    ctx.fillStyle="rgba(0,0,0,0.28)";
+    ctx.beginPath(); ctx.ellipse(x+4, y+4, 16, 11, 0, 0, Math.PI*2); ctx.fill();
+    // tronco
+    ctx.fillStyle="#7a5a32";
+    ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI*2); ctx.fill();
+    // frondas (vista cenital)
+    for(let i=0;i<7;i++){
+      const a = (i/7)*Math.PI*2 + (x*0.01);
+      const lx = x + Math.cos(a)*15, ly = y + Math.sin(a)*15;
+      ctx.fillStyle = i%2 ? "#1f8f3a" : "#2bb14a";
+      ctx.beginPath(); ctx.ellipse(lx, ly, 9, 4, a, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.fillStyle="#3fd16a"; ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
   }
 
   function drawPolice(p){
@@ -935,6 +1105,13 @@
       ctx.restore(); return;
     }
     ctx.fillStyle=c.color; roundRect(-c.w/2,-c.h/2,c.w,c.h,6); ctx.fill();
+    // brillo/reflejo glossy a lo ancho de la carrocería
+    const sh = ctx.createLinearGradient(-c.w/2,0,c.w/2,0);
+    sh.addColorStop(0,"rgba(255,255,255,0.28)");
+    sh.addColorStop(0.5,"rgba(255,255,255,0)");
+    sh.addColorStop(0.85,"rgba(0,0,0,0.18)");
+    sh.addColorStop(1,"rgba(0,0,0,0.28)");
+    ctx.fillStyle=sh; roundRect(-c.w/2,-c.h/2,c.w,c.h,6); ctx.fill();
 
     if(c.type==="minibus"){
       // franja de color a lo largo del minibús
