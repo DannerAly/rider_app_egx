@@ -15,6 +15,12 @@
   #hud .stars { color: #ffd34d; letter-spacing: 2px; }
   #hud .bs { color: #7CFC9A; font-weight: 700; }
   #hud .mode { color: #9fd0ff; font-weight: 600; }
+  #bars { margin-top: 4px; }
+  #bars.hidden { opacity: .35; }
+  .barrow { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 13px; }
+  .bar { display: inline-block; width: 120px; height: 11px; background: rgba(0,0,0,.5);
+    border: 1px solid rgba(255,255,255,.25); border-radius: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 100%; transition: width .15s, background .2s; }
   #mission { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
     background: rgba(0,0,0,0.45); padding: 8px 18px; border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.15); font-size: 15px; max-width: 80vw; }
@@ -39,6 +45,10 @@
   <div>💵 <span class="bs">Bs <span id="cash">0</span></span></div>
   <div>🚨 Búsqueda: <span class="stars" id="stars">—</span></div>
   <div class="mode" id="mode">🚶 A pie</div>
+  <div id="bars">
+    <div class="barrow">⛽ <span class="bar"><i id="fuel"></i></span></div>
+    <div class="barrow">🔧 <span class="bar"><i id="hp"></i></span></div>
+  </div>
 </div>
 
 <div id="mission" class="panel">Cargando misión…</div>
@@ -47,10 +57,11 @@
 
 <div id="help" class="panel">
   <kbd>W A S D</kbd>/<kbd>↑↓←→</kbd> mover/conducir &nbsp;·&nbsp;
-  <kbd>E</kbd> subir/bajar del auto &nbsp;·&nbsp;
-  <kbd>ESPACIO</kbd> freno de mano / correr &nbsp;·&nbsp;
+  <kbd>E</kbd> subir/bajar &nbsp;·&nbsp;
+  <kbd>ESPACIO</kbd> freno / correr &nbsp;·&nbsp;
   <kbd>H</kbd> bocina &nbsp;·&nbsp;
   <kbd>M</kbd> minimapa
+  <br>⛽ recarga en gasolineras &nbsp;·&nbsp; 🚔 escapa de la policía si te buscan &nbsp;·&nbsp; 🔧 cuida los choques
 </div>
 
 <script>
@@ -236,7 +247,8 @@
       stripe: mini ? carColors[(cars.length)%carColors.length] : null,
       maxSpeed: mini?5.0:6.4, accel: mini?0.13:0.17, reverse:-3.0,
       friction:0.05, turn: mini?0.04:0.05,
-      ai: !isPlayer, aiTurnCd:0 });
+      ai: !isPlayer, aiTurnCd:0,
+      fuel: 100, hp: 100, wrecked: false });
   }
   // Auto del jugador cerca de la plaza
   spawnCar(WORLD/2, WORLD/2 + BLOCK/2, -Math.PI/2, true);
@@ -292,6 +304,55 @@
     mission.to = null;
   }
   newMission();
+
+  // ============================================================
+  //  GASOLINERAS (recargar combustible)
+  // ============================================================
+  const gasStations = [];
+  for(let k=0;k<4;k++){
+    const i = 1 + Math.floor(Math.random()*(COLS-1));
+    const j = 1 + Math.floor(Math.random()*(COLS-1));
+    gasStations.push({ x: i*BLOCK + ROAD/2 + 20, y: j*BLOCK - ROAD/2 - 20 });
+  }
+
+  // ============================================================
+  //  SEMÁFOROS — todas las intersecciones sincronizadas en 2 fases
+  // ============================================================
+  // Eje "ns" (movimiento vertical) y "ew" (horizontal) alternan.
+  function lightFor(axis){
+    const T = 600, t = frame % T;            // ciclo ~10 s
+    // 0..270 NS verde · 270..300 NS amarillo · 300..570 EW verde · 570..600 EW amarillo
+    if(axis==="ns"){
+      if(t<270) return "green"; if(t<300) return "yellow"; return "red";
+    } else {
+      if(t<300) return "red"; if(t<570) return "green"; return "yellow";
+    }
+  }
+  const intersections = [];
+  for(let i=1;i<COLS;i++) for(let j=1;j<COLS;j++) intersections.push({x:i*BLOCK, y:j*BLOCK});
+
+  // ============================================================
+  //  POLICÍA — aparece y persigue según el nivel de búsqueda
+  // ============================================================
+  const police = [];
+  let bustTimer = 0;
+  function spawnPolice(){
+    // aparece en un borde, lejos del jugador
+    const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
+    let x,y,tries=0;
+    do{
+      x = 60 + Math.random()*(WORLD-120);
+      y = 60 + Math.random()*(WORLD-120);
+      tries++;
+    } while(tries<20 && (Math.hypot(x-ent.x,y-ent.y)<500 || hitsBuilding(x,y,18)));
+    police.push({ x, y, angle:0, speed:0, w:27, h:48, maxSpeed:6.8, hp:100, turnCd:0 });
+  }
+  function managePolice(){
+    const target = wanted;                    // nº deseado = estrellas
+    while(police.length < target) spawnPolice();
+    if(wanted===0 && police.length){ police.length = 0; }
+    while(police.length > target) police.pop();
+  }
 
   // ============================================================
   //  ENTRADA
@@ -388,9 +449,10 @@
         drivingIndex = -1;
         toast("Bajaste del auto");
       } else {
-        // subir al auto más cercano
+        // subir al auto más cercano (no destruido)
         let best=-1, bd=60*60;
         for(let i=0;i<cars.length;i++){
+          if(cars[i].wrecked) continue;
           const d = (cars[i].x-player.x)**2 + (cars[i].y-player.y)**2;
           if(d<bd){ bd=d; best=i; }
         }
@@ -403,6 +465,8 @@
     else updateOnFoot();
 
     updateAICars();
+    managePolice();
+    updatePolice();
     updatePeds();
 
     // --- monedas ---
@@ -437,13 +501,24 @@
                 - height(car.x, car.y);
     const gravity = -slope * 0.9;   // subida frena, bajada acelera
 
-    if(K.up()) car.speed += car.accel;
-    else if(K.down()) car.speed -= car.accel*1.4;
+    const hasFuel = car.fuel > 0;
+    if(K.up() && hasFuel) car.speed += car.accel;
+    else if(K.down() && hasFuel) car.speed -= car.accel*1.4;
     else { car.speed += (car.speed>0?-1:1)*Math.min(Math.abs(car.speed),car.friction); }
     car.speed += gravity;           // efecto de la cuesta
     if(K.action()) car.speed *= 0.85;
     const maxUp = car.maxSpeed * (1 - Math.max(0,slope)*1.4); // tope menor cuesta arriba
     car.speed = Math.max(car.reverse, Math.min(Math.max(1.5,maxUp), car.speed));
+
+    // consumo de combustible (más a mayor velocidad)
+    if(Math.abs(car.speed) > 0.2)
+      car.fuel = Math.max(0, car.fuel - (0.012 + Math.abs(car.speed)*0.004));
+    // recarga en gasolinera
+    for(const g of gasStations){
+      if((car.x-g.x)**2 + (car.y-g.y)**2 < 50*50){
+        car.fuel = Math.min(100, car.fuel + 0.9);
+      }
+    }
 
     const dir = car.speed>=0?1:-1;
     const steer = car.turn * (Math.min(Math.abs(car.speed),3)/3);
@@ -457,7 +532,9 @@
     const by = Math.max(m, Math.min(WORLD-m, ny));
     if(!hitsBuilding(bx,by,18)){ car.x=bx; car.y=by; }
     else {
-      if(Math.abs(car.speed)>3.5){ wanted=Math.min(5,wanted+1); wantedTimer=540; }
+      const impact = Math.abs(car.speed);
+      if(impact>3.5){ wanted=Math.min(5,wanted+1); wantedTimer=540; }
+      if(impact>2.2) damageCar(car, impact*2.2);   // choque daña el vehículo
       car.speed *= -0.25;
     }
     // atropellos
@@ -466,6 +543,31 @@
         p.flee = 160; wanted = Math.min(5, wanted+1); wantedTimer=540;
       }
     }
+  }
+
+  function damageCar(car, dmg){
+    car.hp = Math.max(0, car.hp - dmg);
+    if(car.hp<=0 && !car.wrecked){
+      car.wrecked = true; car.speed = 0;
+      // expulsa al jugador si conducía este auto
+      const idx = cars.indexOf(car);
+      if(idx===drivingIndex){
+        player.x = car.x + Math.cos(car.angle+Math.PI/2)*26;
+        player.y = car.y + Math.sin(car.angle+Math.PI/2)*26;
+        drivingIndex = -1;
+        toast("💥 ¡Vehículo destruido!");
+      }
+    }
+  }
+
+  function bustPlayer(){
+    const perdido = Math.round(cash*0.4);
+    cash -= perdido;
+    wanted = 0; police.length = 0; bustTimer = 0;
+    // reaparece junto a la plaza
+    player.x = WORLD/2 + 40; player.y = WORLD/2 + BLOCK/2;
+    drivingIndex = -1;
+    toast(`🚔 ¡Te atraparon! −Bs ${perdido}`);
   }
 
   function updateOnFoot(){
@@ -485,12 +587,43 @@
     } else player.speed = 0;
   }
 
+  // ¿está el coche detenido por un semáforo en rojo justo delante?
+  function stoppedByLight(c){
+    const ca = Math.cos(c.angle), sa = Math.sin(c.angle);
+    const horizontal = Math.abs(ca) > Math.abs(sa);
+    const axis = horizontal ? "ew" : "ns";
+    const st = lightFor(axis);
+    if(st==="green") return false;
+    // distancia a la línea de detención de la próxima intersección en su sentido
+    const ahead = horizontal ? c.x + Math.sign(ca)*40 : c.y + Math.sign(sa)*40;
+    const line = Math.round((horizontal ? c.x : c.y) / BLOCK) * BLOCK;
+    const stopLine = line - Math.sign(horizontal?ca:sa)*(ROAD/2);
+    const cur = horizontal ? c.x : c.y;
+    const dist = (stopLine - cur) * Math.sign(horizontal?ca:sa);
+    return dist > 4 && dist < 46;
+  }
+
+  // mantener el carril derecho según el sentido de marcha
+  function laneKeep(c){
+    const ca = Math.cos(c.angle), sa = Math.sin(c.angle);
+    if(Math.abs(ca) > Math.abs(sa)){           // moviéndose en X → carril en Y
+      const line = Math.round(c.y / BLOCK) * BLOCK;
+      const want = line + Math.sign(ca)*(ROAD*0.22);  // derecha según sentido
+      c.y += (want - c.y) * 0.08;
+    } else {                                   // moviéndose en Y → carril en X
+      const line = Math.round(c.x / BLOCK) * BLOCK;
+      const want = line - Math.sign(sa)*(ROAD*0.22);
+      c.x += (want - c.x) * 0.08;
+    }
+  }
+
   function updateAICars(){
     for(let i=0;i<cars.length;i++){
       if(i===drivingIndex) continue;
       const c = cars[i];
-      if(!c.ai){ continue; } // estacionado
-      c.speed = 2.6;
+      if(!c.ai || c.wrecked){ continue; } // estacionado o destruido
+      laneKeep(c);
+      c.speed = stoppedByLight(c) ? 0 : 2.6;   // frena en rojo
       if(c.aiTurnCd>0) c.aiTurnCd--;
       const nx = c.x + Math.cos(c.angle)*c.speed;
       const ny = c.y + Math.sin(c.angle)*c.speed;
@@ -500,8 +633,37 @@
       } else if(c.aiTurnCd===0 && Math.random()<0.01){
         c.angle += (Math.random()<0.5?1:-1)*Math.PI/2; // giro ocasional en cruce
         c.aiTurnCd = 60;
-      } else { c.x=nx; c.y=ny; }
+      } else if(c.speed>0){ c.x=nx; c.y=ny; }
     }
+  }
+
+  // ---- Policía: persigue al jugador ----
+  function updatePolice(){
+    const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
+    let near = false;
+    for(const p of police){
+      const want = Math.atan2(ent.y-p.y, ent.x-p.x);
+      // giro suave hacia el objetivo
+      let da = ((want - p.angle + Math.PI*3) % (Math.PI*2)) - Math.PI;
+      p.angle += Math.max(-0.08, Math.min(0.08, da));
+      const dist = Math.hypot(ent.x-p.x, ent.y-p.y);
+      p.speed = dist>70 ? p.maxSpeed : 1.5;
+      const nx = p.x + Math.cos(p.angle)*p.speed;
+      const ny = p.y + Math.sin(p.angle)*p.speed;
+      if(!hitsBuilding(nx,ny,18) && nx>20 && nx<WORLD-20 && ny>20 && ny<WORLD-20){
+        p.x=nx; p.y=ny; p.turnCd=0;
+      } else if(--p.turnCd<=0){ p.angle += (Math.random()<0.5?1:-1)*0.8; p.turnCd=20; }
+
+      // contacto con el jugador
+      if(dist < 30){
+        near = true;
+        if(drivingIndex>=0) damageCar(cars[drivingIndex], 0.6); // embiste tu auto
+      }
+    }
+    // arresto si te alcanzan a pie (o auto destruido) sostenidamente
+    const vulnerable = drivingIndex<0 || cars[drivingIndex].wrecked;
+    if(near && vulnerable){ if(++bustTimer > 90) bustPlayer(); }
+    else bustTimer = Math.max(0, bustTimer-2);
   }
 
   function updatePeds(){
@@ -540,6 +702,7 @@
   let nf = 0;
 
   function draw(){
+    update();                 // física + lógica del juego
     nf = nightLevel();
     const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
     const camX = ent.x - canvas.width/2;
@@ -648,6 +811,22 @@
       }
     }
 
+    // gasolineras
+    for(const g of gasStations){
+      if(!vis(g.x,g.y,60)) continue;
+      ctx.fillStyle="#214a8c"; ctx.fillRect(g.x-26,g.y-22,52,44);
+      ctx.fillStyle="#e74c3c"; ctx.fillRect(g.x-26,g.y-22,52,8);
+      ctx.fillStyle="#fff"; ctx.font="bold 13px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText("⛽ GAS", g.x, g.y+6);
+    }
+
+    // semáforos en las intersecciones
+    for(const it of intersections){
+      if(!vis(it.x,it.y,90)) continue;
+      drawLight(it.x - ROAD/2 - 6, it.y - ROAD/2 - 6, lightFor("ns")); // controla tráfico vertical
+      drawLight(it.x + ROAD/2 + 6, it.y + ROAD/2 + 6, lightFor("ew")); // controla tráfico horizontal
+    }
+
     // monedas
     for(const c of coins){
       if(!vis(c.x,c.y,30)) continue;
@@ -704,6 +883,9 @@
       drawCar(c, i===drivingIndex);
     }
 
+    // patrullas
+    for(const p of police){ if(vis(p.x,p.y,40)) drawPolice(p); }
+
     // jugador a pie
     if(drivingIndex<0) drawPlayer();
 
@@ -717,10 +899,41 @@
     requestAnimationFrame(draw);
   }
 
+  function drawLight(x, y, state){
+    ctx.fillStyle = "#222"; ctx.fillRect(x-3, y-9, 6, 18);
+    const col = state==="green" ? "#37d24a" : state==="yellow" ? "#f1c40f" : "#e74c3c";
+    ctx.fillStyle = col;
+    const cy = state==="green" ? y+5 : state==="yellow" ? y : y-5;
+    ctx.beginPath(); ctx.arc(x, cy, 2.6, 0, Math.PI*2); ctx.fill();
+  }
+
+  function drawPolice(p){
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.rotate(p.angle + Math.PI/2);
+    ctx.fillStyle="rgba(0,0,0,0.35)"; ctx.fillRect(-p.w/2+3,-p.h/2+4,p.w,p.h);
+    ctx.fillStyle="#1b2535"; roundRect(-p.w/2,-p.h/2,p.w,p.h,6); ctx.fill();
+    ctx.fillStyle="#e9edf2"; ctx.fillRect(-p.w/2,-4,p.w,10);  // puerta blanca
+    ctx.fillStyle="#bfe3ff"; ctx.fillRect(-p.w/2+4,-p.h/2+7,p.w-8,11);
+    // luces estroboscópicas
+    const flash = (frame % 20) < 10;
+    ctx.fillStyle = flash ? "#ff2d2d" : "#2d6bff";
+    ctx.fillRect(-p.w/2+4, -2, p.w/2-4, 4);
+    ctx.fillStyle = flash ? "#2d6bff" : "#ff2d2d";
+    ctx.fillRect(1, -2, p.w/2-5, 4);
+    ctx.restore();
+  }
+
   function drawCar(c, isPlayer){
     ctx.save();
     ctx.translate(c.x, c.y); ctx.rotate(c.angle + Math.PI/2);
     ctx.fillStyle="rgba(0,0,0,0.35)"; ctx.fillRect(-c.w/2+3,-c.h/2+4,c.w,c.h);
+    if(c.wrecked){
+      ctx.fillStyle="#3a3330"; roundRect(-c.w/2,-c.h/2,c.w,c.h,6); ctx.fill();
+      // humo
+      ctx.fillStyle=`rgba(120,120,120,${0.3+0.2*Math.sin(frame*0.2)})`;
+      ctx.beginPath(); ctx.arc(0,-c.h/2-4, 7+2*Math.sin(frame*0.15), 0, Math.PI*2); ctx.fill();
+      ctx.restore(); return;
+    }
     ctx.fillStyle=c.color; roundRect(-c.w/2,-c.h/2,c.w,c.h,6); ctx.fill();
 
     if(c.type==="minibus"){
@@ -792,6 +1005,17 @@
       mission.stage==="pickup"
         ? `📦 <b>Recoger paquete</b> — a ${dist} m`
         : `🏁 <b>Entregar pedido</b> — a ${dist} m  (+Bs 300)`;
+
+    // barras de combustible y vida del vehículo actual
+    const bars = document.getElementById("bars");
+    const car = drivingIndex>=0 ? cars[drivingIndex] : null;
+    bars.classList.toggle("hidden", !car);
+    const fuel = car ? car.fuel : 0, hp = car ? car.hp : 0;
+    const fEl = document.getElementById("fuel"), hEl = document.getElementById("hp");
+    fEl.style.width = fuel + "%";
+    fEl.style.background = fuel<20 ? "#e74c3c" : fuel<50 ? "#f1c40f" : "#39c46a";
+    hEl.style.width = hp + "%";
+    hEl.style.background = hp<25 ? "#e74c3c" : hp<55 ? "#f1c40f" : "#39c46a";
   }
 
   function drawMinimap(){
@@ -810,6 +1034,9 @@
       ctx.moveTo(x0, y0+i*BLOCK*sc); ctx.lineTo(x0+S, y0+i*BLOCK*sc);
     }
     ctx.stroke();
+    // gasolineras
+    ctx.fillStyle="#5aa9ff";
+    for(const g of gasStations) ctx.fillRect(x0+g.x*sc-2, y0+g.y*sc-2, 4,4);
     // misión
     const t = mission.stage==="pickup"?mission.from:mission.to;
     if(t){ ctx.fillStyle = mission.stage==="pickup"?"#4f8cff":"#ff8c28";
@@ -818,6 +1045,9 @@
     ctx.fillStyle="#aaa";
     for(let i=0;i<cars.length;i++){ if(i===drivingIndex) continue;
       ctx.fillRect(x0+cars[i].x*sc-1, y0+cars[i].y*sc-1, 2,2); }
+    // patrullas (parpadean)
+    ctx.fillStyle = (frame%20)<10 ? "#ff2d2d" : "#2d6bff";
+    for(const p of police){ ctx.beginPath(); ctx.arc(x0+p.x*sc, y0+p.y*sc, 3,0,Math.PI*2); ctx.fill(); }
     // jugador
     const ent = drivingIndex>=0?cars[drivingIndex]:player;
     ctx.fillStyle="#ff3b3b";
