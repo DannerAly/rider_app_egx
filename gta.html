@@ -340,7 +340,7 @@
   function spawnCar(x,y,angle,isPlayer,type){
     type = type || "car";
     const mini = type==="minibus";
-    cars.push({ x,y,angle, speed:0,
+    cars.push({ x,y,angle, speed:0, vx:0, vy:0,
       type,
       w: mini?30:26, h: mini?64:46,
       color: mini ? "#eef1f4" : (isPlayer ? "#d83b3b" : carColors[(cars.length)%carColors.length]),
@@ -369,6 +369,7 @@
 
   // ===== Estado del juego =====
   let gameState = "menu";   // "menu" | "playing" | "paused"
+  let frame = 0;            // contador global de frames (lógica)
 
   // ===== Cámara (seguimiento suave, look-ahead, zoom, shake) =====
   const cam = { x: player.x, y: player.y, zoom: 1, shake: 0 };
@@ -388,7 +389,7 @@
   function addSkid(x,y){ skids.push({ x, y, life: 240 }); if(skids.length>400) skids.shift(); }
 
   // ===== Puntaje / combo / récord =====
-  let score = 0, combo = 0, comboTimer = 0;
+  let score = 0, combo = 0, comboTimer = 0, driftScore = 0;
   let best = 0;
   try { best = parseInt(localStorage.getItem("vicepaz_best")||"0",10)||0; } catch(_){}
   function addScore(n){
@@ -418,19 +419,35 @@
   }
   for(let i=0;i<14;i++) spawnCoin();
 
-  // Misión de delivery
+  // Misiones variadas: delivery · taxi · contrarreloj
   let cash = 0, wanted = 0, wantedTimer = 0;
-  const mission = { stage:"pickup", from:null, to:null, startFrame:0 };
+  const mission = { type:"delivery", stage:"pickup", from:null, to:null,
+                    startFrame:0, cps:[], idx:0, deadline:0 };
   function randRoadPoint(){
     // punto cerca de una vereda (transitable a pie y en auto)
     const cx = Math.floor(Math.random()*COLS), cy = Math.floor(Math.random()*(COLS-1));
     return { x: cx*BLOCK + ROAD/2 + 10 + Math.random()*40,
              y: cy*BLOCK + ROAD/2 + 10 + Math.random()*40 };
   }
+  function currentTarget(){
+    if(mission.type==="timetrial") return mission.cps[mission.idx];
+    return mission.stage==="pickup" ? mission.from : mission.to;
+  }
   function newMission(){
-    mission.stage = "pickup";
-    mission.from = randRoadPoint();
-    mission.to = null;
+    const r = Math.random();
+    mission.type = r<0.5 ? "delivery" : r<0.8 ? "taxi" : "timetrial";
+    mission.startFrame = frame;
+    if(mission.type==="timetrial"){
+      mission.cps = [randRoadPoint(), randRoadPoint(), randRoadPoint()];
+      mission.idx = 0;
+      mission.deadline = frame + 60*24;     // 24 s
+      toast("⏱️ Contrarreloj: cruza 3 puntos");
+    } else {
+      mission.stage = "pickup";
+      mission.from = randRoadPoint();
+      mission.to = null;
+      toast(mission.type==="taxi" ? "🚖 Taxi: recoge al pasajero" : "📦 Nuevo pedido");
+    }
   }
   newMission();
 
@@ -616,7 +633,7 @@
         player.x = c.x + Math.cos(c.angle+Math.PI/2)*26;
         player.y = c.y + Math.sin(c.angle+Math.PI/2)*26;
         player.angle = c.angle;
-        c.speed = 0; c.ai = false; // queda estacionado
+        c.speed = 0; c.vx = 0; c.vy = 0; c.ai = false; // queda estacionado
         drivingIndex = -1;
         toast("Bajaste del auto");
       } else {
@@ -651,34 +668,57 @@
       }
     }
 
-    // --- misión ---
-    const target = mission.stage==="pickup" ? mission.from : mission.to;
-    if(target && (ent.x-target.x)**2+(ent.y-target.y)**2 < 44*44){
-      if(mission.stage==="pickup"){
-        mission.stage="deliver"; mission.to = randRoadPoint();
-        mission.startFrame = frame;
-        burst(target.x,target.y,14,"#4f8cff",3,30); sfx("coin");
-        toast("📦 Paquete recogido — ¡a entregar!");
-      } else {
-        // bonus por rapidez + combo encadenado
-        const secs = (frame - mission.startFrame)/60;
-        const timeBonus = Math.max(0, Math.round(200 - secs*8));
-        combo = Math.min(9, combo+1); comboTimer = 600;
-        const payout = (300 + timeBonus) * (1 + combo*0.15);
-        const gained = Math.round(payout);
-        cash += gained; addScore(gained);
-        burst(target.x,target.y,22,"#ffcf5c",3.5,36); sfx("deliver");
-        cam.shake = Math.max(cam.shake, 4);
-        toast(`✅ Entrega +Bs ${gained}  (combo x${combo+1}, bonus ${timeBonus})`);
-        newMission();
-      }
-    }
+    // --- misiones ---
+    updateMission(ent);
 
     // combo decae si tardas mucho entre entregas
     if(comboTimer>0){ if(--comboTimer<=0) combo=0; }
 
     // --- búsqueda decae ---
     if(wanted>0){ if(--wantedTimer<=0){ wanted--; wantedTimer=540; } }
+  }
+
+  function reward(base, fast){
+    const secs = (frame - mission.startFrame)/60;
+    const timeBonus = fast ? Math.max(0, Math.round(220 - secs*8)) : 0;
+    combo = Math.min(9, combo+1); comboTimer = 600;
+    const gained = Math.round((base + timeBonus) * (1 + combo*0.15));
+    cash += gained; addScore(gained); sfx("deliver");
+    cam.shake = Math.max(cam.shake, 4);
+    return gained;
+  }
+  function updateMission(ent){
+    const t = currentTarget();
+    const reached = t && (ent.x-t.x)**2+(ent.y-t.y)**2 < 44*44;
+
+    if(mission.type==="timetrial"){
+      if(reached){
+        mission.idx++;
+        burst(t.x,t.y,12,"#36e0ff",3,28); sfx("coin");
+        if(mission.idx>=mission.cps.length){
+          const g = reward(250, true);
+          toast(`🏁 Contrarreloj completada +Bs ${g} (x${combo+1})`);
+          newMission();
+        } else toast(`✓ Punto ${mission.idx}/${mission.cps.length}`);
+      }
+      if(frame>mission.deadline){
+        combo=0; comboTimer=0; toast("⏱️ ¡Se acabó el tiempo!"); newMission();
+      }
+      return;
+    }
+
+    if(!reached) return;
+    if(mission.stage==="pickup"){
+      if(mission.type==="taxi" && drivingIndex<0) return;  // el pasajero necesita un auto
+      mission.stage="deliver"; mission.to = randRoadPoint(); mission.startFrame = frame;
+      burst(t.x,t.y,14,"#4f8cff",3,30); sfx("coin");
+      toast(mission.type==="taxi" ? "🚖 Pasajero a bordo — llévalo" : "📦 Paquete recogido — ¡a entregar!");
+    } else {
+      const g = reward(mission.type==="taxi" ? 350 : 300, true);
+      burst(t.x,t.y,22,"#ffcf5c",3.5,36);
+      toast(`✅ ${mission.type==="taxi"?"Pasajero entregado":"Entrega"} +Bs ${g} (x${combo+1})`);
+      newMission();
+    }
   }
 
   function updateParticles(){
@@ -698,61 +738,79 @@
     const gravity = -slope * 0.9;   // subida frena, bajada acelera
 
     const hasFuel = car.fuel > 0;
-    if(K.up() && hasFuel) car.speed += car.accel;
-    else if(K.down() && hasFuel) car.speed -= car.accel*1.4;
-    else { car.speed += (car.speed>0?-1:1)*Math.min(Math.abs(car.speed),car.friction); }
-    car.speed += gravity;           // efecto de la cuesta
-    if(K.action()) car.speed *= 0.85;
-    const maxUp = car.maxSpeed * (1 - Math.max(0,slope)*1.4); // tope menor cuesta arriba
-    car.speed = Math.max(car.reverse, Math.min(Math.max(1.5,maxUp), car.speed));
+    const cos = Math.cos(car.angle), sin = Math.sin(car.angle);
+    // descomponer velocidad en componente de avance (vf) y lateral (vl)
+    let vf = car.vx*cos + car.vy*sin;
+    let vl = -car.vx*sin + car.vy*cos;
 
-    // consumo de combustible (más a mayor velocidad)
-    if(Math.abs(car.speed) > 0.2)
-      car.fuel = Math.max(0, car.fuel - (0.012 + Math.abs(car.speed)*0.004));
-    // recarga en gasolinera
-    for(const g of gasStations){
-      if((car.x-g.x)**2 + (car.y-g.y)**2 < 50*50){
-        car.fuel = Math.min(100, car.fuel + 0.9);
-      }
-    }
+    // motor sobre el eje de avance
+    if(K.up() && hasFuel) vf += car.accel;
+    else if(K.down() && hasFuel) vf -= car.accel*1.4;
+    else vf += (vf>0?-1:1)*Math.min(Math.abs(vf), car.friction);
+    vf += gravity;                              // cuesta
+    const handbrake = K.action();
+    if(handbrake) vf *= 0.92;                    // el freno de mano reduce el avance
+    const maxUp = car.maxSpeed * (1 - Math.max(0,slope)*1.4);
+    vf = Math.max(car.reverse, Math.min(Math.max(1.5,maxUp), vf));
 
-    const dir = car.speed>=0?1:-1;
-    const steer = car.turn * (Math.min(Math.abs(car.speed),3)/3);
+    // dirección: gira el morro; el grip lateral hace que el coche siga (o derrape)
     const turning = (K.left()?-1:0) + (K.right()?1:0);
-    if(turning) car.angle += steer*dir*turning;
+    const steer = car.turn * (Math.min(Math.abs(vf),3)/3) * (vf>=0?1:-1);
+    if(turning) car.angle += steer*turning;
+
+    // grip lateral: bajo con freno de mano o a alta velocidad => DERRAPE
+    const baseGrip = handbrake ? 0.93 : 0.80;
+    const grip = Math.min(0.95, baseGrip + Math.max(0,Math.abs(vf)-5)*0.02);
+    vl *= grip;
+
+    // recomponer la velocidad en el mundo
+    car.vx = cos*vf - sin*vl;
+    car.vy = sin*vf + cos*vl;
+    car.speed = vf;                              // velocidad de avance (HUD/sonido/impacto)
+
+    // consumo de combustible
+    if(Math.abs(vf) > 0.2)
+      car.fuel = Math.max(0, car.fuel - (0.012 + Math.abs(vf)*0.004));
+    for(const g of gasStations){
+      if((car.x-g.x)**2 + (car.y-g.y)**2 < 50*50) car.fuel = Math.min(100, car.fuel + 0.9);
+    }
 
     // humo de escape al acelerar
-    if(K.up() && hasFuel && Math.abs(car.speed)>1 && frame%3===0){
-      const rx = car.x - Math.cos(car.angle)*(car.h/2);
-      const ry = car.y - Math.sin(car.angle)*(car.h/2);
+    if(K.up() && hasFuel && Math.abs(vf)>1 && frame%3===0){
+      const rx = car.x - cos*(car.h/2), ry = car.y - sin*(car.h/2);
       spawnParticle(rx,ry,(Math.random()-0.5)*0.4,(Math.random()-0.5)*0.4,18,"rgba(120,120,120,0.5)",3);
     }
-    // marcas de derrape (freno de mano a velocidad, o giro brusco rápido)
-    const skidding = (K.action() && Math.abs(car.speed)>2) || (turning && Math.abs(car.speed)>4.5);
-    if(skidding && frame%2===0){
+    // marcas de derrape cuando hay deslizamiento lateral real
+    const drifting = Math.abs(vl) > 1.1;
+    if((drifting || (handbrake && Math.abs(vf)>2)) && frame%2===0){
       for(const s of [-1,1]){
-        const wx = car.x + Math.cos(car.angle+Math.PI/2)*s*(car.w*0.35) - Math.cos(car.angle)*(car.h*0.35);
-        const wy = car.y + Math.sin(car.angle+Math.PI/2)*s*(car.w*0.35) - Math.sin(car.angle)*(car.h*0.35);
+        const wx = car.x + Math.cos(car.angle+Math.PI/2)*s*(car.w*0.35) - cos*(car.h*0.35);
+        const wy = car.y + Math.sin(car.angle+Math.PI/2)*s*(car.w*0.35) - sin*(car.h*0.35);
         addSkid(wx,wy);
       }
+      // recompensa por derrape sostenido (juego arcade)
+      if(drifting && Math.abs(vf)>3){ driftScore += Math.abs(vl); }
+    } else if(driftScore>0){
+      if(driftScore>40){ const b=Math.round(driftScore); addScore(b); toast(`🌀 ¡Derrape! +${b}`); }
+      driftScore = 0;
     }
 
-    const nx = car.x + Math.cos(car.angle)*car.speed;
-    const ny = car.y + Math.sin(car.angle)*car.speed;
+    // mover con la velocidad vectorial
+    const nx = car.x + car.vx, ny = car.y + car.vy;
     const m = 24;
     const bx = Math.max(m, Math.min(WORLD-m, nx));
     const by = Math.max(m, Math.min(WORLD-m, ny));
     if(!hitsBuilding(bx,by,18) && !inWater(bx,by)){ car.x=bx; car.y=by; }
     else {
-      const impact = Math.abs(car.speed);
+      const impact = Math.hypot(car.vx, car.vy);
       if(impact>3.5){ wanted=Math.min(5,wanted+1); wantedTimer=540; }
       if(impact>2.2){
-        damageCar(car, impact*2.2);   // choque daña el vehículo
+        damageCar(car, impact*2.2);
         cam.shake = Math.max(cam.shake, Math.min(14, impact*2));
-        burst(car.x+Math.cos(car.angle)*(car.h/2), car.y+Math.sin(car.angle)*(car.h/2), 10, "#ffd27f", impact*0.6, 24);
+        burst(car.x+cos*(car.h/2), car.y+sin*(car.h/2), 10, "#ffd27f", impact*0.6, 24);
         sfx("crash");
       }
-      car.speed *= -0.25;
+      car.vx *= -0.25; car.vy *= -0.25; car.speed = 0; driftScore = 0;
     }
     // atropellos
     for(const p of peds){
@@ -913,7 +971,6 @@
     ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
   }
 
-  let frame = 0;
   // Ciclo día/noche: 0 = mediodía, 1 = medianoche  (~80 s por ciclo)
   function nightLevel(){
     const t = (frame % 4800) / 4800;          // 0..1
@@ -1146,17 +1203,20 @@
       ctx.fillText("Bs", c.x, c.y+bob+1);
     }
 
-    // marcadores de misión
-    const target = mission.stage==="pickup" ? mission.from : mission.to;
+    // marcador del objetivo (según tipo de misión)
+    const target = currentTarget();
     if(target){
+      let col, icon;
+      if(mission.type==="timetrial"){ col="#36e0ff"; icon="⏱️"; }
+      else if(mission.stage==="pickup"){ col = mission.type==="taxi"?"#ffd34d":"#4f8cff"; icon = mission.type==="taxi"?"🚖":"📦"; }
+      else { col="#ff8c28"; icon="🏁"; }
       const pulse = 14 + Math.sin(frame*0.12)*5;
       ctx.beginPath(); ctx.arc(target.x, target.y, pulse, 0, Math.PI*2);
-      ctx.fillStyle = mission.stage==="pickup" ? "rgba(80,140,255,0.25)" : "rgba(255,140,40,0.25)";
-      ctx.fill();
+      ctx.globalAlpha = 0.25; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
       ctx.beginPath(); ctx.arc(target.x, target.y, 9, 0, Math.PI*2);
-      ctx.fillStyle = mission.stage==="pickup" ? "#4f8cff" : "#ff8c28"; ctx.fill();
-      ctx.font="16px sans-serif";
-      ctx.fillText(mission.stage==="pickup"?"📦":"🏁", target.x, target.y-22);
+      ctx.fillStyle = col; ctx.fill();
+      ctx.font="16px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(icon, target.x, target.y-22);
     }
 
     // peatones
@@ -1379,15 +1439,22 @@
       ? (cars[drivingIndex].type==="minibus" ? "🚐 Minibús" : "🚗 Conduciendo")
       : "🚶 A pie";
     document.getElementById("mode").textContent = `${veh}  ·  ${tod}`;
-    const dist = (()=>{
-      const t = mission.stage==="pickup"?mission.from:mission.to;
-      if(!t) return 0;
-      return Math.round(Math.hypot(ent.x-t.x, ent.y-t.y));
-    })();
-    document.getElementById("mission").innerHTML =
-      mission.stage==="pickup"
-        ? `📦 <b>Recoger paquete</b> — a ${dist} m`
-        : `🏁 <b>Entregar pedido</b> — a ${dist} m  (+Bs 300)`;
+    const tt = currentTarget();
+    const dist = tt ? Math.round(Math.hypot(ent.x-tt.x, ent.y-tt.y)) : 0;
+    let mtxt;
+    if(mission.type==="timetrial"){
+      const left = Math.max(0, Math.ceil((mission.deadline - frame)/60));
+      mtxt = `⏱️ <b>Contrarreloj</b> ${mission.idx+1}/${mission.cps.length} — ${left}s — a ${dist} m`;
+    } else if(mission.stage==="pickup"){
+      mtxt = mission.type==="taxi"
+        ? `🚖 <b>Recoger pasajero</b>${drivingIndex<0?" (sube a un auto)":""} — a ${dist} m`
+        : `📦 <b>Recoger paquete</b> — a ${dist} m`;
+    } else {
+      mtxt = mission.type==="taxi"
+        ? `🚖 <b>Llevar al pasajero</b> — a ${dist} m`
+        : `🏁 <b>Entregar pedido</b> — a ${dist} m`;
+    }
+    document.getElementById("mission").innerHTML = mtxt;
 
     // barras de combustible y vida del vehículo actual
     const bars = document.getElementById("bars");
@@ -1420,9 +1487,9 @@
     // gasolineras
     ctx.fillStyle="#5aa9ff";
     for(const g of gasStations) ctx.fillRect(x0+g.x*sc-2, y0+g.y*sc-2, 4,4);
-    // misión
-    const t = mission.stage==="pickup"?mission.from:mission.to;
-    if(t){ ctx.fillStyle = mission.stage==="pickup"?"#4f8cff":"#ff8c28";
+    // objetivo de misión
+    const t = currentTarget();
+    if(t){ ctx.fillStyle = mission.type==="timetrial"?"#36e0ff":(mission.stage==="pickup"?"#4f8cff":"#ff8c28");
       ctx.beginPath(); ctx.arc(x0+t.x*sc, y0+t.y*sc, 4,0,Math.PI*2); ctx.fill(); }
     // autos AI
     ctx.fillStyle="#aaa";
