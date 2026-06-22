@@ -1,346 +1,697 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MINI GTA</title>
+<title>MINI GTA · La Paz</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    height: 100%;
-    background: #111;
-    overflow: hidden;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    color: #fff;
-  }
-  #game { display: block; background: #2b2b2b; }
-  #hud {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    font-size: 14px;
-    line-height: 1.6;
-    text-shadow: 0 1px 3px #000;
-    pointer-events: none;
-    user-select: none;
-  }
+  html, body { height: 100%; background: #1a1d17; overflow: hidden;
+    font-family: "Segoe UI", system-ui, sans-serif; color: #fff; }
+  #game { display: block; }
+  .panel { position: fixed; text-shadow: 0 1px 3px #000; user-select: none; pointer-events: none; }
+  #hud { top: 12px; left: 12px; font-size: 14px; line-height: 1.55; }
   #hud .big { font-size: 22px; font-weight: 700; }
   #hud .stars { color: #ffd34d; letter-spacing: 2px; }
-  #help {
-    position: fixed;
-    bottom: 12px;
-    left: 12px;
-    font-size: 13px;
-    opacity: 0.7;
-    text-shadow: 0 1px 3px #000;
-    user-select: none;
-  }
-  #title {
-    position: fixed;
-    top: 12px;
-    right: 16px;
-    font-weight: 800;
-    font-size: 20px;
-    letter-spacing: 3px;
-    color: #f5d76e;
-    text-shadow: 0 2px 6px #000;
-    user-select: none;
-  }
+  #hud .bs { color: #7CFC9A; font-weight: 700; }
+  #hud .mode { color: #9fd0ff; font-weight: 600; }
+  #mission { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
+    background: rgba(0,0,0,0.45); padding: 8px 18px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15); font-size: 15px; max-width: 80vw; }
+  #mission b { color: #ffcf5c; }
+  #title { top: 10px; right: 16px; font-weight: 800; font-size: 18px; letter-spacing: 2px;
+    color: #f5d76e; text-align: right; }
+  #title small { display:block; font-size: 11px; letter-spacing: 3px; color:#c9a; opacity:.85; }
+  #help { bottom: 10px; left: 12px; font-size: 12.5px; opacity: 0.78; line-height: 1.5; }
+  #help kbd { background:#2b2b2b; border:1px solid #555; border-bottom-width:2px;
+    border-radius:4px; padding:0 5px; font-size:11px; }
+  #toast { bottom: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,120,60,.9); padding: 10px 22px; border-radius: 999px;
+    font-weight: 700; font-size: 16px; opacity: 0; transition: opacity .3s; }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">
-  <div class="big">Speed: <span id="speed">0</span> km/h</div>
-  <div>Wanted: <span class="stars" id="stars">—</span></div>
-  <div>Cash: $<span id="cash">0</span></div>
+
+<div id="hud" class="panel">
+  <div class="big">Vel: <span id="speed">0</span> km/h</div>
+  <div>💵 <span class="bs">Bs <span id="cash">0</span></span></div>
+  <div>🚨 Búsqueda: <span class="stars" id="stars">—</span></div>
+  <div class="mode" id="mode">🚶 A pie</div>
 </div>
-<div id="title">MINI&nbsp;GTA</div>
-<div id="help">WASD / Arrows = drive &nbsp;•&nbsp; SPACE = handbrake &nbsp;•&nbsp; Run over the cash 💰</div>
+
+<div id="mission" class="panel">Cargando misión…</div>
+<div id="title" class="panel">MINI&nbsp;GTA<small>LA&nbsp;PAZ · BOLIVIA</small></div>
+<div id="toast" class="panel"></div>
+
+<div id="help" class="panel">
+  <kbd>W A S D</kbd>/<kbd>↑↓←→</kbd> mover/conducir &nbsp;·&nbsp;
+  <kbd>E</kbd> subir/bajar del auto &nbsp;·&nbsp;
+  <kbd>ESPACIO</kbd> freno de mano / correr &nbsp;·&nbsp;
+  <kbd>H</kbd> bocina &nbsp;·&nbsp;
+  <kbd>M</kbd> minimapa
+</div>
 
 <script>
 (() => {
   "use strict";
-
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
+  function resize(){ canvas.width = innerWidth; canvas.height = innerHeight; }
+  addEventListener("resize", resize); resize();
 
-  function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+  // ============================================================
+  //  CONSTANTES DE MUNDO
+  // ============================================================
+  const WORLD = 3200;
+  const BLOCK = 360;
+  const ROAD  = 120;
+  const SIDEWALK = 22;
+  const COLS = Math.round(WORLD / BLOCK);
+
+  // ============================================================
+  //  TEXTURAS PROCEDURALES (patrones cacheados)
+  // ============================================================
+  function makeCanvas(w, h){ const c = document.createElement("canvas"); c.width=w; c.height=h; return c; }
+
+  function texAsphalt(){
+    const c = makeCanvas(48,48), x = c.getContext("2d");
+    x.fillStyle = "#3b3d40"; x.fillRect(0,0,48,48);
+    for(let i=0;i<260;i++){
+      const v = Math.random();
+      x.fillStyle = v>0.5 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.16)";
+      x.fillRect(Math.random()*48, Math.random()*48, 1.5, 1.5);
+    }
+    return ctx.createPattern(c,"repeat");
   }
-  window.addEventListener("resize", resize);
-  resize();
+  function texBrick(base, mortar){
+    const bw=30, bh=15, c = makeCanvas(bw*2, bh*2), x=c.getContext("2d");
+    x.fillStyle = mortar; x.fillRect(0,0,bw*2,bh*2);
+    x.fillStyle = base;
+    const m=2;
+    // fila 1
+    x.fillRect(m, m, bw-m, bh-m);
+    x.fillRect(bw+m, m, bw-m, bh-m);
+    // fila 2 (desfasada media unidad)
+    x.fillRect(-bw/2+m, bh+m, bw-m, bh-m);
+    x.fillRect(bw/2+m, bh+m, bw-m, bh-m);
+    x.fillRect(bw*1.5+m, bh+m, bw-m, bh-m);
+    // sombreado sutil por ladrillo
+    x.fillStyle = "rgba(0,0,0,0.08)";
+    x.fillRect(m, m, bw-m, 3);
+    x.fillRect(bw+m, m, bw-m, 3);
+    return ctx.createPattern(c,"repeat");
+  }
+  function texGround(){
+    const c = makeCanvas(40,40), x = c.getContext("2d");
+    x.fillStyle = "#7a6b56"; x.fillRect(0,0,40,40);     // tierra paceña
+    for(let i=0;i<140;i++){
+      const v = Math.random();
+      x.fillStyle = v>0.6 ? "rgba(120,140,80,0.25)" : "rgba(0,0,0,0.12)";
+      x.fillRect(Math.random()*40, Math.random()*40, 2, 2);
+    }
+    return ctx.createPattern(c,"repeat");
+  }
+  function texSidewalk(){
+    const c = makeCanvas(28,28), x = c.getContext("2d");
+    x.fillStyle = "#9a9690"; x.fillRect(0,0,28,28);
+    x.strokeStyle = "rgba(0,0,0,0.18)"; x.lineWidth=1.5;
+    x.strokeRect(0.5,0.5,27,27);
+    return ctx.createPattern(c,"repeat");
+  }
 
-  // ---------- World ----------
-  const WORLD = 2400;          // world is WORLD x WORLD pixels
-  const BLOCK = 300;           // city block size
-  const ROAD = 90;             // road width
+  let PAT = {};
+  function buildPatterns(){
+    PAT.asphalt  = texAsphalt();
+    PAT.ground   = texGround();
+    PAT.sidewalk = texSidewalk();
+    PAT.brickRed   = texBrick("#9c4a35", "#5e2b1e");
+    PAT.brickOcre  = texBrick("#b5793f", "#6e4422");
+    PAT.brickGray  = texBrick("#8a8079", "#574f49");
+    PAT.painted1   = texBrick("#3f7d8c", "#274e57");  // casa pintada celeste
+    PAT.painted2   = texBrick("#c9a23f", "#8a6e22");  // casa pintada amarilla
+  }
+  buildPatterns();
+  const brickKeys = ["brickRed","brickOcre","brickGray","painted1","painted2"];
 
-  // A building is placed inside each block, leaving roads on the grid lines.
+  // ============================================================
+  //  GENERACIÓN DE LA CIUDAD
+  // ============================================================
   const buildings = [];
-  const buildingColors = ["#5b5b66", "#6a6a55", "#705a5a", "#566a66", "#62607a"];
-  for (let bx = 0; bx < WORLD; bx += BLOCK) {
-    for (let by = 0; by < WORLD; by += BLOCK) {
-      const pad = ROAD / 2 + 18;
-      const x = bx + pad;
-      const y = by + pad;
-      const w = BLOCK - pad * 2 - 12;
-      const h = BLOCK - pad * 2 - 12;
-      if (w > 20 && h > 20) {
-        buildings.push({
-          x, y, w, h,
-          color: buildingColors[(bx / BLOCK + by / BLOCK) % buildingColors.length]
-        });
+  const centerCol = Math.floor(COLS/2), centerRow = Math.floor(COLS/2);
+  let plaza = null;
+
+  for(let cx=0; cx<COLS; cx++){
+    for(let cy=0; cy<COLS; cy++){
+      const bx = cx*BLOCK, by = cy*BLOCK;
+      const pad = ROAD/2;
+      const ix = bx + pad, iy = by + pad;
+      const iw = BLOCK - ROAD, ih = BLOCK - ROAD;
+
+      if(cx===centerCol && cy===centerRow){
+        plaza = { x: ix+SIDEWALK, y: iy+SIDEWALK, w: iw-SIDEWALK*2, h: ih-SIDEWALK*2 };
+        continue; // Plaza Murillo: sin edificio
       }
+      // 1 edificio por manzana (con vereda alrededor)
+      const x = ix + SIDEWALK, y = iy + SIDEWALK;
+      const w = iw - SIDEWALK*2, h = ih - SIDEWALK*2;
+      const key = brickKeys[(cx*7 + cy*3) % brickKeys.length];
+      // ventanas en grilla
+      const cols = Math.max(2, Math.floor(w/40));
+      const rows = Math.max(2, Math.floor(h/40));
+      buildings.push({ x, y, w, h, pat: key, cols, rows,
+        seed: (cx*31 + cy*17),
+        tanks: 1 + ((cx+cy)%3) });   // tanques de agua negros (Tigre)
     }
   }
 
-  // Cash pickups scattered around
-  const pickups = [];
-  function spawnPickup() {
-    pickups.push({
-      x: 80 + Math.random() * (WORLD - 160),
-      y: 80 + Math.random() * (WORLD - 160),
-      r: 11
+  // Veredas: rectángulo de la manzana interior (debajo del edificio)
+  function blockInner(cx, cy){
+    const pad = ROAD/2;
+    return { x: cx*BLOCK+pad, y: cy*BLOCK+pad, w: BLOCK-ROAD, h: BLOCK-ROAD };
+  }
+
+  // Nombres de avenidas (etiquetas sobre las calles)
+  const streetH = ["Av. Mariscal Santa Cruz","El Prado","Av. 6 de Agosto","Av. Arce","Av. Camacho","Av. Buenos Aires"];
+  const streetV = ["Calle Comercio","Av. Montes","Av. Illimani","Calle Sagárnaga","Av. Saavedra","Calle Jaén"];
+  const streetLabels = [];
+  for(let i=1;i<COLS;i++){
+    streetLabels.push({ x: WORLD/2, y: i*BLOCK, text: streetH[i%streetH.length], angle: 0 });
+    streetLabels.push({ x: i*BLOCK, y: WORLD/2, text: streetV[i%streetV.length], angle: -Math.PI/2 });
+  }
+
+  // Teleférico (Mi Teleférico): 3 líneas con cabinas en movimiento
+  const teleLines = [
+    { color:"#d63b3b", a:{x:120,y:420}, b:{x:WORLD-200,y:WORLD-700}, n:6 }, // Línea Roja
+    { color:"#e8c33a", a:{x:WORLD-300,y:200}, b:{x:300,y:WORLD-300}, n:6 }, // Línea Amarilla
+    { color:"#3fae5a", a:{x:200,y:WORLD-200}, b:{x:WORLD-200,y:300}, n:5 }  // Línea Verde
+  ];
+
+  // ============================================================
+  //  ENTIDADES
+  // ============================================================
+  // Autos (el del jugador es uno de estos). drivingIndex = auto que conduce el jugador, o -1 (a pie)
+  const carColors = ["#d83b3b","#2d6cdf","#e4b53a","#2fae5a","#9b59b6","#e67e22"];
+  const cars = [];
+  function roadCenter(i){ return i*BLOCK; }
+  function spawnCar(x,y,angle,isPlayer){
+    cars.push({ x,y,angle, speed:0, w:26, h:46,
+      color: isPlayer ? "#d83b3b" : carColors[(cars.length)%carColors.length],
+      maxSpeed:6.4, accel:0.17, reverse:-3.0, friction:0.05, turn:0.05,
+      ai: !isPlayer, aiTurnCd:0 });
+  }
+  // Auto del jugador cerca de la plaza
+  spawnCar(WORLD/2, WORLD/2 + BLOCK/2, -Math.PI/2, true);
+  // Tráfico AI sobre las avenidas
+  for(let k=0;k<9;k++){
+    const onVert = Math.random()<0.5;
+    const line = roadCenter(1 + Math.floor(Math.random()*(COLS-1)));
+    const along = 200 + Math.random()*(WORLD-400);
+    if(onVert) spawnCar(line, along, Math.random()<0.5?Math.PI/2:-Math.PI/2, false);
+    else       spawnCar(along, line, Math.random()<0.5?0:Math.PI, false);
+  }
+
+  // Jugador a pie
+  const player = { x: WORLD/2 + 40, y: WORLD/2 + BLOCK/2, angle:-Math.PI/2,
+    r: 9, speed: 0, walk: 2.0, run: 3.6 };
+  let drivingIndex = -1;   // empieza a pie, junto al auto
+
+  // Peatones
+  const peds = [];
+  for(let i=0;i<34;i++){
+    const cx = Math.floor(Math.random()*COLS), cy = Math.floor(Math.random()*COLS);
+    const inner = blockInner(cx,cy);
+    peds.push({
+      x: inner.x + Math.random()*inner.w,
+      y: inner.y + Math.random()*inner.h,
+      angle: Math.random()*Math.PI*2,
+      speed: 0.5 + Math.random()*0.5,
+      color: `hsl(${Math.floor(Math.random()*360)},45%,55%)`,
+      cd: 0, flee: 0
     });
   }
-  for (let i = 0; i < 12; i++) spawnPickup();
 
-  // ---------- Player car ----------
-  const car = {
-    x: WORLD / 2,
-    y: WORLD / 2,
-    angle: -Math.PI / 2,   // facing up
-    speed: 0,
-    w: 26,
-    h: 46,
-    maxSpeed: 6.2,
-    accel: 0.16,
-    reverse: -3.0,
-    friction: 0.045,
-    turn: 0.045
-  };
+  // Monedas (Bs) repartidas
+  const coins = [];
+  function spawnCoin(){
+    coins.push({ x: 80+Math.random()*(WORLD-160), y: 80+Math.random()*(WORLD-160), r:10, t: Math.random()*6 });
+  }
+  for(let i=0;i<14;i++) spawnCoin();
 
-  let cash = 0;
-  let wanted = 0;
-  let wantedDecay = 0;
+  // Misión de delivery
+  let cash = 0, wanted = 0, wantedTimer = 0;
+  const mission = { stage:"pickup", from:null, to:null };
+  function randRoadPoint(){
+    // punto cerca de una vereda (transitable a pie y en auto)
+    const cx = Math.floor(Math.random()*COLS), cy = Math.floor(Math.random()*COLS);
+    return { x: cx*BLOCK + ROAD/2 + 10 + Math.random()*40,
+             y: cy*BLOCK + ROAD/2 + 10 + Math.random()*40 };
+  }
+  function newMission(){
+    mission.stage = "pickup";
+    mission.from = randRoadPoint();
+    mission.to = null;
+  }
+  newMission();
 
-  // ---------- Input ----------
+  // ============================================================
+  //  ENTRADA
+  // ============================================================
   const keys = {};
-  const watched = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","a","s","d","W","A","S","D"];
-  window.addEventListener("keydown", e => {
-    keys[e.key] = true;
-    if (watched.includes(e.key)) e.preventDefault();
+  const block = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "];
+  addEventListener("keydown", e=>{
+    if(block.includes(e.key)) e.preventDefault();
+    keys[e.key.toLowerCase()] = true;
+    if(e.key.toLowerCase()==="e") pendingEE = true;
+    if(e.key.toLowerCase()==="h") honk();
+    if(e.key.toLowerCase()==="m") showMinimap = !showMinimap;
   });
-  window.addEventListener("keyup", e => { keys[e.key] = false; });
+  addEventListener("keyup", e=>{ keys[e.key.toLowerCase()] = false; });
+  const K = {
+    up:()=>keys["arrowup"]||keys["w"], down:()=>keys["arrowdown"]||keys["s"],
+    left:()=>keys["arrowleft"]||keys["a"], right:()=>keys["arrowright"]||keys["d"],
+    action:()=>keys[" "]
+  };
+  let pendingEE = false;
+  let showMinimap = true;
 
-  const up    = () => keys["ArrowUp"]    || keys["w"] || keys["W"];
-  const down  = () => keys["ArrowDown"]  || keys["s"] || keys["S"];
-  const left  = () => keys["ArrowLeft"]  || keys["a"] || keys["A"];
-  const right = () => keys["ArrowRight"] || keys["d"] || keys["D"];
-  const brake = () => keys[" "];
+  // Bocina (WebAudio)
+  let actx = null;
+  function honk(){
+    try{
+      actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type="square"; o.frequency.value=300; g.gain.value=0.06;
+      o.connect(g); g.connect(actx.destination); o.start();
+      o.stop(actx.currentTime+0.25);
+      // peatones cercanos huyen
+      const e = drivingIndex>=0 ? cars[drivingIndex] : player;
+      for(const p of peds){ if(Math.hypot(p.x-e.x,p.y-e.y)<160) p.flee=120; }
+    }catch(_){}
+  }
 
-  // ---------- Collision helpers ----------
-  function collidesBuildings(nx, ny) {
-    const half = Math.max(car.w, car.h) / 2;
-    for (const b of buildings) {
-      if (nx + half > b.x && nx - half < b.x + b.w &&
-          ny + half > b.y && ny - half < b.y + b.h) {
-        // tighter check against the car's bounding circle
-        const cx = Math.max(b.x, Math.min(nx, b.x + b.w));
-        const cy = Math.max(b.y, Math.min(ny, b.y + b.h));
-        const dx = nx - cx, dy = ny - cy;
-        if (dx * dx + dy * dy < half * half) return true;
+  // ============================================================
+  //  COLISIONES
+  // ============================================================
+  function hitsBuilding(nx, ny, half){
+    for(const b of buildings){
+      if(nx+half>b.x && nx-half<b.x+b.w && ny+half>b.y && ny-half<b.y+b.h){
+        const cx = Math.max(b.x, Math.min(nx, b.x+b.w));
+        const cy = Math.max(b.y, Math.min(ny, b.y+b.h));
+        const dx = nx-cx, dy = ny-cy;
+        if(dx*dx+dy*dy < half*half) return true;
       }
     }
     return false;
   }
 
-  // ---------- Update ----------
-  function update() {
-    // Acceleration
-    if (up())        car.speed += car.accel;
-    else if (down()) car.speed -= car.accel * 1.4;
-    else {
-      // natural friction toward 0
-      if (car.speed > 0) car.speed = Math.max(0, car.speed - car.friction);
-      else if (car.speed < 0) car.speed = Math.min(0, car.speed + car.friction);
+  function toast(msg){
+    const t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove("show"), 1600);
+  }
+
+  // ============================================================
+  //  ACTUALIZACIÓN
+  // ============================================================
+  function update(){
+    // --- subir / bajar del auto ---
+    if(pendingEE){
+      pendingEE = false;
+      if(drivingIndex>=0){
+        // bajar: ubicar al jugador al costado del auto
+        const c = cars[drivingIndex];
+        player.x = c.x + Math.cos(c.angle+Math.PI/2)*26;
+        player.y = c.y + Math.sin(c.angle+Math.PI/2)*26;
+        player.angle = c.angle;
+        c.speed = 0; c.ai = false; // queda estacionado
+        drivingIndex = -1;
+        toast("Bajaste del auto");
+      } else {
+        // subir al auto más cercano
+        let best=-1, bd=60*60;
+        for(let i=0;i<cars.length;i++){
+          const d = (cars[i].x-player.x)**2 + (cars[i].y-player.y)**2;
+          if(d<bd){ bd=d; best=i; }
+        }
+        if(best>=0){ drivingIndex=best; cars[best].ai=false; toast("Subiste al auto"); }
+        else toast("No hay auto cerca");
+      }
     }
 
-    if (brake()) car.speed *= 0.86;
+    if(drivingIndex>=0) updateDriving(cars[drivingIndex]);
+    else updateOnFoot();
 
+    updateAICars();
+    updatePeds();
+
+    // --- monedas ---
+    const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
+    for(let i=coins.length-1;i>=0;i--){
+      const c = coins[i];
+      if((ent.x-c.x)**2+(ent.y-c.y)**2 < (c.r+18)**2){
+        coins.splice(i,1); cash+=50; spawnCoin(); toast("+Bs 50");
+      }
+    }
+
+    // --- misión ---
+    const target = mission.stage==="pickup" ? mission.from : mission.to;
+    if(target && (ent.x-target.x)**2+(ent.y-target.y)**2 < 44*44){
+      if(mission.stage==="pickup"){
+        mission.stage="deliver"; mission.to = randRoadPoint();
+        toast("📦 Paquete recogido — ¡a entregar!");
+      } else {
+        cash += 300; toast("✅ Entrega completa  +Bs 300");
+        newMission();
+      }
+    }
+
+    // --- búsqueda decae ---
+    if(wanted>0){ if(--wantedTimer<=0){ wanted--; wantedTimer=540; } }
+  }
+
+  function updateDriving(car){
+    if(K.up()) car.speed += car.accel;
+    else if(K.down()) car.speed -= car.accel*1.4;
+    else { car.speed += (car.speed>0?-1:1)*Math.min(Math.abs(car.speed),car.friction); }
+    if(K.action()) car.speed *= 0.85;
     car.speed = Math.max(car.reverse, Math.min(car.maxSpeed, car.speed));
 
-    // Steering only matters while moving; flips when reversing
-    const dir = car.speed >= 0 ? 1 : -1;
-    const steerAmount = car.turn * (Math.min(Math.abs(car.speed), 3) / 3);
-    if (left())  car.angle -= steerAmount * dir;
-    if (right()) car.angle += steerAmount * dir;
+    const dir = car.speed>=0?1:-1;
+    const steer = car.turn * (Math.min(Math.abs(car.speed),3)/3);
+    if(K.left())  car.angle -= steer*dir;
+    if(K.right()) car.angle += steer*dir;
 
-    // Proposed new position
-    const nx = car.x + Math.cos(car.angle) * car.speed;
-    const ny = car.y + Math.sin(car.angle) * car.speed;
-
-    // World bounds
-    const margin = 24;
-    let bx = Math.max(margin, Math.min(WORLD - margin, nx));
-    let by = Math.max(margin, Math.min(WORLD - margin, ny));
-
-    if (!collidesBuildings(bx, by)) {
-      car.x = bx; car.y = by;
-    } else {
-      // crash: bounce back and earn a wanted star occasionally
-      if (Math.abs(car.speed) > 3.4) {
-        wanted = Math.min(5, wanted + 1);
-        wantedDecay = 600; // frames until a star drops
-      }
+    const nx = car.x + Math.cos(car.angle)*car.speed;
+    const ny = car.y + Math.sin(car.angle)*car.speed;
+    const m = 24;
+    const bx = Math.max(m, Math.min(WORLD-m, nx));
+    const by = Math.max(m, Math.min(WORLD-m, ny));
+    if(!hitsBuilding(bx,by,18)){ car.x=bx; car.y=by; }
+    else {
+      if(Math.abs(car.speed)>3.5){ wanted=Math.min(5,wanted+1); wantedTimer=540; }
       car.speed *= -0.25;
     }
+    // atropellos
+    for(const p of peds){
+      if(Math.abs(car.speed)>1 && (p.x-car.x)**2+(p.y-car.y)**2 < 22*22){
+        p.flee = 160; wanted = Math.min(5, wanted+1); wantedTimer=540;
+      }
+    }
+  }
 
-    // Pickups
-    for (let i = pickups.length - 1; i >= 0; i--) {
-      const p = pickups[i];
-      const dx = car.x - p.x, dy = car.y - p.y;
-      if (dx * dx + dy * dy < (p.r + 18) * (p.r + 18)) {
-        pickups.splice(i, 1);
-        cash += 100;
-        spawnPickup();
+  function updateOnFoot(){
+    const sp = K.action() ? player.run : player.walk;
+    let vx=0, vy=0;
+    if(K.up()) vy-=1; if(K.down()) vy+=1;
+    if(K.left()) vx-=1; if(K.right()) vx+=1;
+    if(vx||vy){
+      const len = Math.hypot(vx,vy); vx/=len; vy/=len;
+      player.angle = Math.atan2(vy,vx);
+      const m=12;
+      const nx = Math.max(m, Math.min(WORLD-m, player.x+vx*sp));
+      const ny = Math.max(m, Math.min(WORLD-m, player.y+vy*sp));
+      if(!hitsBuilding(nx, player.y, player.r)) player.x=nx;
+      if(!hitsBuilding(player.x, ny, player.r)) player.y=ny;
+      player.speed = sp;
+    } else player.speed = 0;
+  }
+
+  function updateAICars(){
+    for(let i=0;i<cars.length;i++){
+      if(i===drivingIndex) continue;
+      const c = cars[i];
+      if(!c.ai){ continue; } // estacionado
+      c.speed = 2.6;
+      if(c.aiTurnCd>0) c.aiTurnCd--;
+      const nx = c.x + Math.cos(c.angle)*c.speed;
+      const ny = c.y + Math.sin(c.angle)*c.speed;
+      if(nx<30||nx>WORLD-30||ny<30||ny>WORLD-30||hitsBuilding(nx,ny,18)){
+        c.angle += (Math.random()<0.5?1:-1)*Math.PI/2; // gira 90°
+        c.aiTurnCd = 30;
+      } else if(c.aiTurnCd===0 && Math.random()<0.01){
+        c.angle += (Math.random()<0.5?1:-1)*Math.PI/2; // giro ocasional en cruce
+        c.aiTurnCd = 60;
+      } else { c.x=nx; c.y=ny; }
+    }
+  }
+
+  function updatePeds(){
+    for(const p of peds){
+      if(p.flee>0){
+        p.flee--;
+        const ent = drivingIndex>=0?cars[drivingIndex]:player;
+        const a = Math.atan2(p.y-ent.y, p.x-ent.x);
+        const nx = p.x+Math.cos(a)*1.8, ny=p.y+Math.sin(a)*1.8;
+        if(!hitsBuilding(nx,ny,p.r)){ p.x=Math.max(8,Math.min(WORLD-8,nx)); p.y=Math.max(8,Math.min(WORLD-8,ny)); }
+        continue;
+      }
+      if(p.cd>0){ p.cd--; continue; }
+      const nx = p.x+Math.cos(p.angle)*p.speed, ny=p.y+Math.sin(p.angle)*p.speed;
+      if(nx<10||nx>WORLD-10||ny<10||ny>WORLD-10||hitsBuilding(nx,ny,p.r)){
+        p.angle += Math.PI/2 + Math.random()*Math.PI; p.cd=20;
+      } else { p.x=nx; p.y=ny; if(Math.random()<0.01){ p.angle+=(Math.random()-0.5); } }
+    }
+  }
+
+  // ============================================================
+  //  DIBUJO
+  // ============================================================
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  let frame = 0;
+  function draw(){
+    const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
+    const camX = ent.x - canvas.width/2;
+    const camY = ent.y - canvas.height/2;
+    const view = { x:camX, y:camY, w:canvas.width, h:canvas.height };
+    const vis = (x,y,pad)=> x>camX-pad && x<camX+view.w+pad && y>camY-pad && y<camY+view.h+pad;
+
+    ctx.save();
+    ctx.translate(-camX, -camY);
+
+    // suelo (tierra)
+    ctx.fillStyle = PAT.ground;
+    ctx.fillRect(camX, camY, view.w, view.h);
+
+    // asfalto en la grilla de calles
+    ctx.fillStyle = PAT.asphalt;
+    for(let i=0;i<=COLS;i++){
+      const gx = i*BLOCK;
+      ctx.fillRect(gx-ROAD/2, camY, ROAD, view.h);
+      ctx.fillRect(camX, gx-ROAD/2, view.w, ROAD);
+    }
+
+    // veredas (perímetro interior de cada manzana visible)
+    ctx.fillStyle = PAT.sidewalk;
+    for(let cx=0;cx<COLS;cx++) for(let cy=0;cy<COLS;cy++){
+      const inner = blockInner(cx,cy);
+      if(!vis(inner.x+inner.w/2, inner.y+inner.h/2, BLOCK)) continue;
+      ctx.fillRect(inner.x, inner.y, inner.w, inner.h);
+    }
+
+    // líneas amarillas de carril
+    ctx.strokeStyle = "#d9c45a"; ctx.lineWidth=3; ctx.setLineDash([20,24]);
+    ctx.beginPath();
+    for(let i=0;i<=COLS;i++){
+      ctx.moveTo(i*BLOCK, camY); ctx.lineTo(i*BLOCK, camY+view.h);
+      ctx.moveTo(camX, i*BLOCK); ctx.lineTo(camX+view.w, i*BLOCK);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+
+    // nombres de avenidas
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.font = "bold 16px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    for(const s of streetLabels){
+      if(!vis(s.x,s.y,400)) continue;
+      ctx.save(); ctx.translate(s.x,s.y); ctx.rotate(s.angle); ctx.fillText(s.text,0,0); ctx.restore();
+    }
+
+    // Plaza Murillo
+    if(plaza){
+      ctx.fillStyle = "#4f7d3f"; ctx.fillRect(plaza.x, plaza.y, plaza.w, plaza.h);
+      ctx.fillStyle = "rgba(180,160,120,0.6)"; // caminos en cruz
+      ctx.fillRect(plaza.x+plaza.w/2-6, plaza.y, 12, plaza.h);
+      ctx.fillRect(plaza.x, plaza.y+plaza.h/2-6, plaza.w, 12);
+      // Catedral / Palacio (bloque)
+      ctx.fillStyle = "#cdbfa0";
+      ctx.fillRect(plaza.x+plaza.w/2-26, plaza.y+plaza.h/2-26, 52, 52);
+      ctx.fillStyle = "#8a7b5c";
+      ctx.fillText("⛪", plaza.x+plaza.w/2, plaza.y+plaza.h/2);
+      ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font="bold 13px sans-serif";
+      ctx.fillText("Plaza Murillo", plaza.x+plaza.w/2, plaza.y-10);
+      ctx.font = "bold 16px sans-serif";
+    }
+
+    // edificios con textura de ladrillo + ventanas + tanques
+    for(const b of buildings){
+      if(!vis(b.x+b.w/2, b.y+b.h/2, BLOCK)) continue;
+      ctx.fillStyle = "rgba(0,0,0,0.30)"; ctx.fillRect(b.x+5,b.y+6,b.w,b.h); // sombra
+      ctx.fillStyle = PAT[b.pat]; ctx.fillRect(b.x,b.y,b.w,b.h);
+      ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth=2; ctx.strokeRect(b.x,b.y,b.w,b.h);
+      // ventanas
+      const padW=10, gw=(b.w-padW*2)/b.cols, gh=(b.h-padW*2)/b.rows;
+      for(let i=0;i<b.cols;i++) for(let j=0;j<b.rows;j++){
+        const lit = ((b.seed + i*3 + j*7) % 5)===0;
+        ctx.fillStyle = lit ? "rgba(255,225,150,0.85)" : "rgba(40,55,75,0.7)";
+        ctx.fillRect(b.x+padW+i*gw+gw*0.2, b.y+padW+j*gh+gh*0.2, gw*0.6, gh*0.55);
+      }
+      // tanques de agua negros (Tigre) en el techo
+      ctx.fillStyle = "#1c1c1c";
+      for(let t=0;t<b.tanks;t++){
+        ctx.beginPath();
+        ctx.arc(b.x+14+t*16, b.y+12, 5, 0, Math.PI*2); ctx.fill();
       }
     }
 
-    // Wanted decay over time
-    if (wanted > 0) {
-      wantedDecay--;
-      if (wantedDecay <= 0) { wanted--; wantedDecay = 600; }
-    }
-  }
-
-  // ---------- Draw ----------
-  function drawWorld(camX, camY) {
-    // Ground / grass base
-    ctx.fillStyle = "#33402f";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Roads: draw the full asphalt grid, then lane markings
-    ctx.fillStyle = "#3a3a3a";
-    for (let x = 0; x <= WORLD; x += BLOCK) {
-      ctx.fillRect(x - ROAD / 2 - camX, -camY, ROAD, WORLD);
-    }
-    for (let y = 0; y <= WORLD; y += BLOCK) {
-      ctx.fillRect(-camX, y - ROAD / 2 - camY, WORLD, ROAD);
+    // Teleférico: cables + cabinas
+    for(const L of teleLines){
+      ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(L.a.x,L.a.y); ctx.lineTo(L.b.x,L.b.y); ctx.stroke();
+      for(let i=0;i<L.n;i++){
+        const t = ((frame*0.0006 + i/L.n) % 1);
+        const cx = L.a.x + (L.b.x-L.a.x)*t;
+        const cy = L.a.y + (L.b.y-L.a.y)*t;
+        if(!vis(cx,cy,40)) continue;
+        ctx.fillStyle = "#333"; ctx.fillRect(cx-2,cy-12,4,12); // brazo
+        ctx.fillStyle = L.color; roundRect(cx-7,cy,14,16,4); ctx.fill();
+        ctx.strokeStyle="rgba(0,0,0,0.4)"; ctx.lineWidth=1; ctx.stroke();
+        ctx.fillStyle="rgba(180,220,255,0.7)"; ctx.fillRect(cx-5,cy+3,10,5);
+      }
     }
 
-    // Lane dashes
-    ctx.strokeStyle = "#d9c45a";
-    ctx.lineWidth = 3;
-    ctx.setLineDash([18, 22]);
-    ctx.beginPath();
-    for (let x = 0; x <= WORLD; x += BLOCK) {
-      ctx.moveTo(x - camX, -camY);
-      ctx.lineTo(x - camX, WORLD - camY);
-    }
-    for (let y = 0; y <= WORLD; y += BLOCK) {
-      ctx.moveTo(-camX, y - camY);
-      ctx.lineTo(WORLD - camX, y - camY);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Buildings (only those near the screen)
-    for (const b of buildings) {
-      const sx = b.x - camX, sy = b.y - camY;
-      if (sx + b.w < -40 || sy + b.h < -40 || sx > canvas.width + 40 || sy > canvas.height + 40) continue;
-      ctx.fillStyle = "#000";
-      ctx.globalAlpha = 0.25;
-      ctx.fillRect(sx + 5, sy + 6, b.w, b.h); // shadow
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = b.color;
-      ctx.fillRect(sx, sy, b.w, b.h);
-      // simple roof detail
-      ctx.fillStyle = "rgba(255,255,255,0.06)";
-      ctx.fillRect(sx + 6, sy + 6, b.w - 12, b.h - 12);
+    // monedas
+    for(const c of coins){
+      if(!vis(c.x,c.y,30)) continue;
+      const bob = Math.sin(frame*0.1 + c.t)*2;
+      ctx.beginPath(); ctx.arc(c.x, c.y+bob, c.r,0,Math.PI*2);
+      ctx.fillStyle="#2ecc71"; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle="#0c5"; ctx.stroke();
+      ctx.fillStyle="#063"; ctx.font="bold 11px sans-serif";
+      ctx.fillText("Bs", c.x, c.y+bob+1);
     }
 
-    // Pickups
-    for (const p of pickups) {
-      const sx = p.x - camX, sy = p.y - camY;
-      if (sx < -20 || sy < -20 || sx > canvas.width + 20 || sy > canvas.height + 20) continue;
-      ctx.beginPath();
-      ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = "#2ecc71";
+    // marcadores de misión
+    const target = mission.stage==="pickup" ? mission.from : mission.to;
+    if(target){
+      const pulse = 14 + Math.sin(frame*0.12)*5;
+      ctx.beginPath(); ctx.arc(target.x, target.y, pulse, 0, Math.PI*2);
+      ctx.fillStyle = mission.stage==="pickup" ? "rgba(80,140,255,0.25)" : "rgba(255,140,40,0.25)";
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#0f5";
-      ctx.stroke();
-      ctx.fillStyle = "#063";
-      ctx.font = "bold 13px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("$", sx, sy + 1);
+      ctx.beginPath(); ctx.arc(target.x, target.y, 9, 0, Math.PI*2);
+      ctx.fillStyle = mission.stage==="pickup" ? "#4f8cff" : "#ff8c28"; ctx.fill();
+      ctx.font="16px sans-serif";
+      ctx.fillText(mission.stage==="pickup"?"📦":"🏁", target.x, target.y-22);
     }
+
+    // peatones
+    for(const p of peds){
+      if(!vis(p.x,p.y,20)) continue;
+      ctx.fillStyle="rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(p.x,p.y+5,6,3,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r*0.7,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#e8c9a0"; ctx.beginPath(); ctx.arc(p.x,p.y-2,3.2,0,Math.PI*2); ctx.fill();
+    }
+
+    // autos
+    for(let i=0;i<cars.length;i++){
+      const c = cars[i];
+      if(!vis(c.x,c.y,40)) continue;
+      drawCar(c, i===drivingIndex);
+    }
+
+    // jugador a pie
+    if(drivingIndex<0) drawPlayer();
+
+    ctx.restore();
+
+    // HUD dinámico
+    drawHud(ent);
+    if(showMinimap) drawMinimap();
+    frame++;
+    requestAnimationFrame(draw);
   }
 
-  function drawCar(camX, camY) {
+  function drawCar(c, isPlayer){
     ctx.save();
-    ctx.translate(car.x - camX, car.y - camY);
-    ctx.rotate(car.angle + Math.PI / 2); // sprite drawn pointing up
-
-    // shadow
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.fillRect(-car.w / 2 + 3, -car.h / 2 + 4, car.w, car.h);
-
-    // body
-    ctx.fillStyle = "#d83b3b";
-    roundRect(-car.w / 2, -car.h / 2, car.w, car.h, 6);
-    ctx.fill();
-
-    // windshield
-    ctx.fillStyle = "#bfe3ff";
-    ctx.fillRect(-car.w / 2 + 4, -car.h / 2 + 7, car.w - 8, 11);
-
-    // rear window
-    ctx.fillStyle = "#9fc6e0";
-    ctx.fillRect(-car.w / 2 + 4, car.h / 2 - 16, car.w - 8, 9);
-
+    ctx.translate(c.x, c.y); ctx.rotate(c.angle + Math.PI/2);
+    ctx.fillStyle="rgba(0,0,0,0.35)"; ctx.fillRect(-c.w/2+3,-c.h/2+4,c.w,c.h);
+    ctx.fillStyle=c.color; roundRect(-c.w/2,-c.h/2,c.w,c.h,6); ctx.fill();
+    ctx.fillStyle="#bfe3ff"; ctx.fillRect(-c.w/2+4,-c.h/2+7,c.w-8,11);
+    ctx.fillStyle="#9fc6e0"; ctx.fillRect(-c.w/2+4,c.h/2-16,c.w-8,9);
+    if(isPlayer){ // techo claro para distinguir
+      ctx.fillStyle="rgba(255,255,255,0.25)"; ctx.fillRect(-c.w/2+6,-3,c.w-12,8);
+    }
     ctx.restore();
   }
 
-  function roundRect(x, y, w, h, r) {
+  function drawPlayer(){
+    const p = player;
+    ctx.save(); ctx.translate(p.x, p.y);
+    ctx.fillStyle="rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(0,6,8,4,0,0,Math.PI*2); ctx.fill();
+    ctx.rotate(p.angle + Math.PI/2);
+    ctx.fillStyle="#2b3a67"; roundRect(-6,-6,12,14,4); ctx.fill(); // cuerpo
+    ctx.fillStyle="#e8c9a0"; ctx.beginPath(); ctx.arc(0,-7,4.5,0,Math.PI*2); ctx.fill(); // cabeza
+    ctx.fillStyle="#222"; ctx.fillRect(-4,-9,8,3); // gorra
+    ctx.restore();
+  }
+
+  function drawHud(ent){
+    document.getElementById("speed").textContent =
+      drivingIndex>=0 ? Math.round(Math.abs(cars[drivingIndex].speed)*18) : Math.round(player.speed*12);
+    document.getElementById("cash").textContent = cash;
+    document.getElementById("stars").textContent = wanted>0 ? "★".repeat(wanted) : "—";
+    document.getElementById("mode").textContent = drivingIndex>=0 ? "🚗 Conduciendo" : "🚶 A pie";
+    const dist = (()=>{
+      const t = mission.stage==="pickup"?mission.from:mission.to;
+      if(!t) return 0;
+      return Math.round(Math.hypot(ent.x-t.x, ent.y-t.y));
+    })();
+    document.getElementById("mission").innerHTML =
+      mission.stage==="pickup"
+        ? `📦 <b>Recoger paquete</b> — a ${dist} m`
+        : `🏁 <b>Entregar pedido</b> — a ${dist} m  (+Bs 300)`;
+  }
+
+  function drawMinimap(){
+    const S = 160, pad = 12;
+    const x0 = canvas.width - S - pad, y0 = canvas.height - S - pad;
+    const sc = S / WORLD;
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "#1d2233"; ctx.fillRect(x0,y0,S,S);
+    ctx.strokeStyle = "#000"; ctx.lineWidth=2; ctx.strokeRect(x0,y0,S,S);
+    // grilla de calles
+    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth=1;
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+    for(let i=0;i<=COLS;i++){
+      ctx.moveTo(x0+i*BLOCK*sc, y0); ctx.lineTo(x0+i*BLOCK*sc, y0+S);
+      ctx.moveTo(x0, y0+i*BLOCK*sc); ctx.lineTo(x0+S, y0+i*BLOCK*sc);
+    }
+    ctx.stroke();
+    // misión
+    const t = mission.stage==="pickup"?mission.from:mission.to;
+    if(t){ ctx.fillStyle = mission.stage==="pickup"?"#4f8cff":"#ff8c28";
+      ctx.beginPath(); ctx.arc(x0+t.x*sc, y0+t.y*sc, 4,0,Math.PI*2); ctx.fill(); }
+    // autos AI
+    ctx.fillStyle="#aaa";
+    for(let i=0;i<cars.length;i++){ if(i===drivingIndex) continue;
+      ctx.fillRect(x0+cars[i].x*sc-1, y0+cars[i].y*sc-1, 2,2); }
+    // jugador
+    const ent = drivingIndex>=0?cars[drivingIndex]:player;
+    ctx.fillStyle="#ff3b3b";
+    ctx.beginPath(); ctx.arc(x0+ent.x*sc, y0+ent.y*sc, 4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.6)"; ctx.font="10px sans-serif"; ctx.textAlign="left";
+    ctx.fillText("Mapa (M)", x0+4, y0+12);
+    ctx.restore();
+    ctx.textAlign="center";
   }
 
-  // ---------- HUD ----------
-  const elSpeed = document.getElementById("speed");
-  const elStars = document.getElementById("stars");
-  const elCash = document.getElementById("cash");
-
-  function updateHud() {
-    elSpeed.textContent = Math.round(Math.abs(car.speed) * 18);
-    elStars.textContent = wanted > 0 ? "★".repeat(wanted) : "—";
-    elCash.textContent = cash;
-  }
-
-  // ---------- Loop ----------
-  function frame() {
-    update();
-
-    const camX = car.x - canvas.width / 2;
-    const camY = car.y - canvas.height / 2;
-
-    drawWorld(camX, camY);
-    drawCar(camX, camY);
-    updateHud();
-
-    requestAnimationFrame(frame);
-  }
-  frame();
+  draw();
 })();
 </script>
 </body>
