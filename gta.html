@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MINI GTA</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #111;
+    overflow: hidden;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+  }
+  #game { display: block; background: #2b2b2b; }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    text-shadow: 0 1px 3px #000;
+    pointer-events: none;
+    user-select: none;
+  }
+  #hud .big { font-size: 22px; font-weight: 700; }
+  #hud .stars { color: #ffd34d; letter-spacing: 2px; }
+  #help {
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    font-size: 13px;
+    opacity: 0.7;
+    text-shadow: 0 1px 3px #000;
+    user-select: none;
+  }
+  #title {
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    font-weight: 800;
+    font-size: 20px;
+    letter-spacing: 3px;
+    color: #f5d76e;
+    text-shadow: 0 2px 6px #000;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="big">Speed: <span id="speed">0</span> km/h</div>
+  <div>Wanted: <span class="stars" id="stars">—</span></div>
+  <div>Cash: $<span id="cash">0</span></div>
+</div>
+<div id="title">MINI&nbsp;GTA</div>
+<div id="help">WASD / Arrows = drive &nbsp;•&nbsp; SPACE = handbrake &nbsp;•&nbsp; Run over the cash 💰</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- World ----------
+  const WORLD = 2400;          // world is WORLD x WORLD pixels
+  const BLOCK = 300;           // city block size
+  const ROAD = 90;             // road width
+
+  // A building is placed inside each block, leaving roads on the grid lines.
+  const buildings = [];
+  const buildingColors = ["#5b5b66", "#6a6a55", "#705a5a", "#566a66", "#62607a"];
+  for (let bx = 0; bx < WORLD; bx += BLOCK) {
+    for (let by = 0; by < WORLD; by += BLOCK) {
+      const pad = ROAD / 2 + 18;
+      const x = bx + pad;
+      const y = by + pad;
+      const w = BLOCK - pad * 2 - 12;
+      const h = BLOCK - pad * 2 - 12;
+      if (w > 20 && h > 20) {
+        buildings.push({
+          x, y, w, h,
+          color: buildingColors[(bx / BLOCK + by / BLOCK) % buildingColors.length]
+        });
+      }
+    }
+  }
+
+  // Cash pickups scattered around
+  const pickups = [];
+  function spawnPickup() {
+    pickups.push({
+      x: 80 + Math.random() * (WORLD - 160),
+      y: 80 + Math.random() * (WORLD - 160),
+      r: 11
+    });
+  }
+  for (let i = 0; i < 12; i++) spawnPickup();
+
+  // ---------- Player car ----------
+  const car = {
+    x: WORLD / 2,
+    y: WORLD / 2,
+    angle: -Math.PI / 2,   // facing up
+    speed: 0,
+    w: 26,
+    h: 46,
+    maxSpeed: 6.2,
+    accel: 0.16,
+    reverse: -3.0,
+    friction: 0.045,
+    turn: 0.045
+  };
+
+  let cash = 0;
+  let wanted = 0;
+  let wantedDecay = 0;
+
+  // ---------- Input ----------
+  const keys = {};
+  const watched = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","a","s","d","W","A","S","D"];
+  window.addEventListener("keydown", e => {
+    keys[e.key] = true;
+    if (watched.includes(e.key)) e.preventDefault();
+  });
+  window.addEventListener("keyup", e => { keys[e.key] = false; });
+
+  const up    = () => keys["ArrowUp"]    || keys["w"] || keys["W"];
+  const down  = () => keys["ArrowDown"]  || keys["s"] || keys["S"];
+  const left  = () => keys["ArrowLeft"]  || keys["a"] || keys["A"];
+  const right = () => keys["ArrowRight"] || keys["d"] || keys["D"];
+  const brake = () => keys[" "];
+
+  // ---------- Collision helpers ----------
+  function collidesBuildings(nx, ny) {
+    const half = Math.max(car.w, car.h) / 2;
+    for (const b of buildings) {
+      if (nx + half > b.x && nx - half < b.x + b.w &&
+          ny + half > b.y && ny - half < b.y + b.h) {
+        // tighter check against the car's bounding circle
+        const cx = Math.max(b.x, Math.min(nx, b.x + b.w));
+        const cy = Math.max(b.y, Math.min(ny, b.y + b.h));
+        const dx = nx - cx, dy = ny - cy;
+        if (dx * dx + dy * dy < half * half) return true;
+      }
+    }
+    return false;
+  }
+
+  // ---------- Update ----------
+  function update() {
+    // Acceleration
+    if (up())        car.speed += car.accel;
+    else if (down()) car.speed -= car.accel * 1.4;
+    else {
+      // natural friction toward 0
+      if (car.speed > 0) car.speed = Math.max(0, car.speed - car.friction);
+      else if (car.speed < 0) car.speed = Math.min(0, car.speed + car.friction);
+    }
+
+    if (brake()) car.speed *= 0.86;
+
+    car.speed = Math.max(car.reverse, Math.min(car.maxSpeed, car.speed));
+
+    // Steering only matters while moving; flips when reversing
+    const dir = car.speed >= 0 ? 1 : -1;
+    const steerAmount = car.turn * (Math.min(Math.abs(car.speed), 3) / 3);
+    if (left())  car.angle -= steerAmount * dir;
+    if (right()) car.angle += steerAmount * dir;
+
+    // Proposed new position
+    const nx = car.x + Math.cos(car.angle) * car.speed;
+    const ny = car.y + Math.sin(car.angle) * car.speed;
+
+    // World bounds
+    const margin = 24;
+    let bx = Math.max(margin, Math.min(WORLD - margin, nx));
+    let by = Math.max(margin, Math.min(WORLD - margin, ny));
+
+    if (!collidesBuildings(bx, by)) {
+      car.x = bx; car.y = by;
+    } else {
+      // crash: bounce back and earn a wanted star occasionally
+      if (Math.abs(car.speed) > 3.4) {
+        wanted = Math.min(5, wanted + 1);
+        wantedDecay = 600; // frames until a star drops
+      }
+      car.speed *= -0.25;
+    }
+
+    // Pickups
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const p = pickups[i];
+      const dx = car.x - p.x, dy = car.y - p.y;
+      if (dx * dx + dy * dy < (p.r + 18) * (p.r + 18)) {
+        pickups.splice(i, 1);
+        cash += 100;
+        spawnPickup();
+      }
+    }
+
+    // Wanted decay over time
+    if (wanted > 0) {
+      wantedDecay--;
+      if (wantedDecay <= 0) { wanted--; wantedDecay = 600; }
+    }
+  }
+
+  // ---------- Draw ----------
+  function drawWorld(camX, camY) {
+    // Ground / grass base
+    ctx.fillStyle = "#33402f";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Roads: draw the full asphalt grid, then lane markings
+    ctx.fillStyle = "#3a3a3a";
+    for (let x = 0; x <= WORLD; x += BLOCK) {
+      ctx.fillRect(x - ROAD / 2 - camX, -camY, ROAD, WORLD);
+    }
+    for (let y = 0; y <= WORLD; y += BLOCK) {
+      ctx.fillRect(-camX, y - ROAD / 2 - camY, WORLD, ROAD);
+    }
+
+    // Lane dashes
+    ctx.strokeStyle = "#d9c45a";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([18, 22]);
+    ctx.beginPath();
+    for (let x = 0; x <= WORLD; x += BLOCK) {
+      ctx.moveTo(x - camX, -camY);
+      ctx.lineTo(x - camX, WORLD - camY);
+    }
+    for (let y = 0; y <= WORLD; y += BLOCK) {
+      ctx.moveTo(-camX, y - camY);
+      ctx.lineTo(WORLD - camX, y - camY);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Buildings (only those near the screen)
+    for (const b of buildings) {
+      const sx = b.x - camX, sy = b.y - camY;
+      if (sx + b.w < -40 || sy + b.h < -40 || sx > canvas.width + 40 || sy > canvas.height + 40) continue;
+      ctx.fillStyle = "#000";
+      ctx.globalAlpha = 0.25;
+      ctx.fillRect(sx + 5, sy + 6, b.w, b.h); // shadow
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = b.color;
+      ctx.fillRect(sx, sy, b.w, b.h);
+      // simple roof detail
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(sx + 6, sy + 6, b.w - 12, b.h - 12);
+    }
+
+    // Pickups
+    for (const p of pickups) {
+      const sx = p.x - camX, sy = p.y - camY;
+      if (sx < -20 || sy < -20 || sx > canvas.width + 20 || sy > canvas.height + 20) continue;
+      ctx.beginPath();
+      ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = "#2ecc71";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#0f5";
+      ctx.stroke();
+      ctx.fillStyle = "#063";
+      ctx.font = "bold 13px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("$", sx, sy + 1);
+    }
+  }
+
+  function drawCar(camX, camY) {
+    ctx.save();
+    ctx.translate(car.x - camX, car.y - camY);
+    ctx.rotate(car.angle + Math.PI / 2); // sprite drawn pointing up
+
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(-car.w / 2 + 3, -car.h / 2 + 4, car.w, car.h);
+
+    // body
+    ctx.fillStyle = "#d83b3b";
+    roundRect(-car.w / 2, -car.h / 2, car.w, car.h, 6);
+    ctx.fill();
+
+    // windshield
+    ctx.fillStyle = "#bfe3ff";
+    ctx.fillRect(-car.w / 2 + 4, -car.h / 2 + 7, car.w - 8, 11);
+
+    // rear window
+    ctx.fillStyle = "#9fc6e0";
+    ctx.fillRect(-car.w / 2 + 4, car.h / 2 - 16, car.w - 8, 9);
+
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // ---------- HUD ----------
+  const elSpeed = document.getElementById("speed");
+  const elStars = document.getElementById("stars");
+  const elCash = document.getElementById("cash");
+
+  function updateHud() {
+    elSpeed.textContent = Math.round(Math.abs(car.speed) * 18);
+    elStars.textContent = wanted > 0 ? "★".repeat(wanted) : "—";
+    elCash.textContent = cash;
+  }
+
+  // ---------- Loop ----------
+  function frame() {
+    update();
+
+    const camX = car.x - canvas.width / 2;
+    const camY = car.y - canvas.height / 2;
+
+    drawWorld(camX, camY);
+    drawCar(camX, camY);
+    updateHud();
+
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+</script>
+</body>
+</html>
