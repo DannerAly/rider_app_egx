@@ -38,6 +38,25 @@
     background: rgba(20,120,60,.9); padding: 10px 22px; border-radius: 999px;
     font-weight: 700; font-size: 16px; opacity: 0; transition: opacity .3s; }
   #toast.show { opacity: 1; }
+  #hud .score { color:#ffd34d; font-weight:700; text-shadow:0 0 8px #ffae00; }
+  #hud .best { color:#9aa; font-size:12px; }
+  #hud .combo { color:#ff7847; font-weight:800; text-shadow:0 0 8px #ff4500; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, rgba(40,10,60,.55), rgba(5,5,15,.85));
+    backdrop-filter: blur(3px); z-index: 50; transition: opacity .25s; }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #ov-card { text-align: center; padding: 30px 44px; border-radius: 18px;
+    background: rgba(15,12,28,.82); border: 1px solid rgba(255,45,155,.5);
+    box-shadow: 0 0 40px rgba(255,45,155,.35), inset 0 0 30px rgba(54,224,255,.1); }
+  #ov-card h1 { font-size: 52px; font-weight: 900; font-style: italic; letter-spacing: 4px;
+    color:#ff2d9b; text-shadow: 0 0 14px #ff2d9b, 3px 3px 0 #36e0ff; margin-bottom: 4px; }
+  #ov-sub { color:#36e0ff; letter-spacing: 5px; text-shadow:0 0 8px #36e0ff; margin-bottom: 18px; }
+  #ov-body { color:#cfd6e6; font-size:14px; line-height:1.7; margin-bottom: 20px; min-height: 20px; }
+  #ov-btn { font: 800 18px system-ui; letter-spacing:2px; color:#08111f; cursor:pointer;
+    background:#36e0ff; border:none; padding:12px 38px; border-radius:999px;
+    box-shadow:0 0 20px #36e0ff; transition: transform .1s, box-shadow .2s; }
+  #ov-btn:hover { transform: scale(1.05); box-shadow:0 0 30px #36e0ff; }
+  .ov-hint { color:#8893a8; font-size:12px; margin-top:14px; }
 </style>
 </head>
 <body>
@@ -46,6 +65,8 @@
 <div id="hud" class="panel">
   <div class="big">Vel: <span id="speed">0</span> km/h</div>
   <div>💵 <span class="bs">Bs <span id="cash">0</span></span></div>
+  <div>🏆 <span class="score">Score <span id="score">0</span></span> &nbsp; <span class="best">Récord <span id="best">0</span></span></div>
+  <div>🔥 Combo <span class="combo" id="combo">x1</span></div>
   <div>🚨 Búsqueda: <span class="stars" id="stars">—</span></div>
   <div class="mode" id="mode">🚶 A pie</div>
   <div id="bars">
@@ -58,13 +79,24 @@
 <div id="title" class="panel">VICE&nbsp;PAZ<small>LA&nbsp;PAZ · 198X</small></div>
 <div id="toast" class="panel"></div>
 
+<div id="overlay">
+  <div id="ov-card">
+    <h1>VICE&nbsp;PAZ</h1>
+    <p id="ov-sub">La Paz · 198X</p>
+    <div id="ov-body"></div>
+    <button id="ov-btn">JUGAR</button>
+    <p class="ov-hint">Enter / Espacio · P o Esc para pausar</p>
+  </div>
+</div>
+
 <div id="help" class="panel">
   <kbd>W A S D</kbd>/<kbd>↑↓←→</kbd> mover/conducir &nbsp;·&nbsp;
   <kbd>E</kbd> subir/bajar &nbsp;·&nbsp;
   <kbd>ESPACIO</kbd> freno / correr &nbsp;·&nbsp;
   <kbd>H</kbd> bocina &nbsp;·&nbsp;
-  <kbd>M</kbd> minimapa
-  <br>⛽ recarga en gasolineras &nbsp;·&nbsp; 🚔 escapa de la policía si te buscan &nbsp;·&nbsp; 🔧 cuida los choques
+  <kbd>M</kbd> minimapa &nbsp;·&nbsp;
+  <kbd>P</kbd> pausa
+  <br>⛽ recarga en gasolineras &nbsp;·&nbsp; 🚔 escapa de la policía &nbsp;·&nbsp; 🔥 encadena entregas rápidas para subir el combo
 </div>
 
 <script>
@@ -335,6 +367,35 @@
     r: 9, speed: 0, walk: 2.0, run: 3.6 };
   let drivingIndex = -1;   // empieza a pie, junto al auto
 
+  // ===== Estado del juego =====
+  let gameState = "menu";   // "menu" | "playing" | "paused"
+
+  // ===== Cámara (seguimiento suave, look-ahead, zoom, shake) =====
+  const cam = { x: player.x, y: player.y, zoom: 1, shake: 0 };
+
+  // ===== Partículas y marcas de derrape =====
+  const particles = [];
+  const skids = [];
+  function spawnParticle(x,y,vx,vy,life,color,size){
+    particles.push({ x,y,vx,vy,life,max:life,color,size });
+  }
+  function burst(x,y,n,color,spread,life){
+    for(let i=0;i<n;i++){
+      const a = Math.random()*Math.PI*2, s = Math.random()*spread;
+      spawnParticle(x,y, Math.cos(a)*s, Math.sin(a)*s, life*(0.6+Math.random()*0.6), color, 2+Math.random()*3);
+    }
+  }
+  function addSkid(x,y){ skids.push({ x, y, life: 240 }); if(skids.length>400) skids.shift(); }
+
+  // ===== Puntaje / combo / récord =====
+  let score = 0, combo = 0, comboTimer = 0;
+  let best = 0;
+  try { best = parseInt(localStorage.getItem("vicepaz_best")||"0",10)||0; } catch(_){}
+  function addScore(n){
+    score += n;
+    if(score > best){ best = score; try{ localStorage.setItem("vicepaz_best", best); }catch(_){} }
+  }
+
   // Peatones
   const peds = [];
   for(let i=0;i<34;i++){
@@ -359,10 +420,10 @@
 
   // Misión de delivery
   let cash = 0, wanted = 0, wantedTimer = 0;
-  const mission = { stage:"pickup", from:null, to:null };
+  const mission = { stage:"pickup", from:null, to:null, startFrame:0 };
   function randRoadPoint(){
     // punto cerca de una vereda (transitable a pie y en auto)
-    const cx = Math.floor(Math.random()*COLS), cy = Math.floor(Math.random()*COLS);
+    const cx = Math.floor(Math.random()*COLS), cy = Math.floor(Math.random()*(COLS-1));
     return { x: cx*BLOCK + ROAD/2 + 10 + Math.random()*40,
              y: cy*BLOCK + ROAD/2 + 10 + Math.random()*40 };
   }
@@ -428,12 +489,18 @@
   const keys = {};
   const block = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "];
   addEventListener("keydown", e=>{
+    const k = e.key.toLowerCase();
     if(block.includes(e.key)) e.preventDefault();
     ensureAudio();
-    keys[e.key.toLowerCase()] = true;
-    if(e.key.toLowerCase()==="e") pendingEE = true;
-    if(e.key.toLowerCase()==="h") honk();
-    if(e.key.toLowerCase()==="m") showMinimap = !showMinimap;
+    if(k==="p" || k==="escape"){ togglePause(); return; }
+    if(gameState!=="playing"){
+      if(k==="enter" || k===" ") startGame();
+      return;
+    }
+    keys[k] = true;
+    if(k==="e") pendingEE = true;
+    if(k==="h") honk();
+    if(k==="m") showMinimap = !showMinimap;
   });
   addEventListener("keyup", e=>{ keys[e.key.toLowerCase()] = false; });
   const K = {
@@ -478,6 +545,42 @@
       for(const p of peds){ if(Math.hypot(p.x-e.x,p.y-e.y)<160) p.flee=120; }
     }catch(_){}
   }
+  // efecto de sonido genérico
+  function sfx(type){
+    try{
+      ensureAudio(); if(!actx) return;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.connect(g); g.connect(actx.destination);
+      const t = actx.currentTime;
+      if(type==="coin"){ o.type="triangle"; o.frequency.setValueAtTime(880,t); o.frequency.setValueAtTime(1320,t+0.07); g.gain.setValueAtTime(0.07,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.18); o.start(t); o.stop(t+0.2); }
+      else if(type==="deliver"){ o.type="square"; o.frequency.setValueAtTime(660,t); o.frequency.setValueAtTime(990,t+0.1); o.frequency.setValueAtTime(1320,t+0.2); g.gain.setValueAtTime(0.06,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.35); o.start(t); o.stop(t+0.36); }
+      else if(type==="crash"){ o.type="sawtooth"; o.frequency.setValueAtTime(140,t); o.frequency.exponentialRampToValueAtTime(40,t+0.2); g.gain.setValueAtTime(0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.25); o.start(t); o.stop(t+0.26); }
+    }catch(_){}
+  }
+
+  // ===== Estados / overlay =====
+  const ov = document.getElementById("overlay");
+  function showOverlay(sub, body, btn){
+    document.getElementById("ov-sub").textContent = sub;
+    document.getElementById("ov-body").innerHTML = body;
+    document.getElementById("ov-btn").textContent = btn;
+    ov.classList.remove("hidden");
+  }
+  function startGame(){ gameState="playing"; ov.classList.add("hidden"); }
+  function togglePause(){
+    if(gameState==="playing"){ gameState="paused";
+      showOverlay("PAUSA", `Score <b>${score}</b> · Récord <b>${best}</b>`, "CONTINUAR"); }
+    else if(gameState==="paused"){ startGame(); }
+  }
+  document.getElementById("ov-btn").addEventListener("click", ()=>{
+    ensureAudio();
+    if(gameState!=="playing") startGame();
+  });
+  // pantalla inicial
+  showOverlay("La Paz · 198X",
+    "Reparte pedidos por la ciudad, esquiva a la policía y haz combos.<br>" +
+    "🚗 Conduce · 🚶 Baja con E · ⛽ Recarga · 🏖️ Llega lejos por tu récord.",
+    "JUGAR");
 
   // ============================================================
   //  COLISIONES
@@ -518,13 +621,13 @@
         toast("Bajaste del auto");
       } else {
         // subir al auto más cercano (no destruido)
-        let best=-1, bd=60*60;
+        let bi=-1, bd=60*60;
         for(let i=0;i<cars.length;i++){
           if(cars[i].wrecked) continue;
           const d = (cars[i].x-player.x)**2 + (cars[i].y-player.y)**2;
-          if(d<bd){ bd=d; best=i; }
+          if(d<bd){ bd=d; bi=i; }
         }
-        if(best>=0){ drivingIndex=best; cars[best].ai=false; toast("Subiste al auto"); }
+        if(bi>=0){ drivingIndex=bi; cars[bi].ai=false; toast("Subiste al auto"); }
         else toast("No hay auto cerca");
       }
     }
@@ -536,13 +639,15 @@
     managePolice();
     updatePolice();
     updatePeds();
+    updateParticles();
 
     // --- monedas ---
     const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
     for(let i=coins.length-1;i>=0;i--){
       const c = coins[i];
       if((ent.x-c.x)**2+(ent.y-c.y)**2 < (c.r+18)**2){
-        coins.splice(i,1); cash+=50; spawnCoin(); toast("+Bs 50");
+        coins.splice(i,1); cash+=50; addScore(50); spawnCoin();
+        burst(c.x,c.y,10,"#7CFC9A",2.5,26); sfx("coin"); toast("+Bs 50");
       }
     }
 
@@ -551,15 +656,38 @@
     if(target && (ent.x-target.x)**2+(ent.y-target.y)**2 < 44*44){
       if(mission.stage==="pickup"){
         mission.stage="deliver"; mission.to = randRoadPoint();
+        mission.startFrame = frame;
+        burst(target.x,target.y,14,"#4f8cff",3,30); sfx("coin");
         toast("📦 Paquete recogido — ¡a entregar!");
       } else {
-        cash += 300; toast("✅ Entrega completa  +Bs 300");
+        // bonus por rapidez + combo encadenado
+        const secs = (frame - mission.startFrame)/60;
+        const timeBonus = Math.max(0, Math.round(200 - secs*8));
+        combo = Math.min(9, combo+1); comboTimer = 600;
+        const payout = (300 + timeBonus) * (1 + combo*0.15);
+        const gained = Math.round(payout);
+        cash += gained; addScore(gained);
+        burst(target.x,target.y,22,"#ffcf5c",3.5,36); sfx("deliver");
+        cam.shake = Math.max(cam.shake, 4);
+        toast(`✅ Entrega +Bs ${gained}  (combo x${combo+1}, bonus ${timeBonus})`);
         newMission();
       }
     }
 
+    // combo decae si tardas mucho entre entregas
+    if(comboTimer>0){ if(--comboTimer<=0) combo=0; }
+
     // --- búsqueda decae ---
     if(wanted>0){ if(--wantedTimer<=0){ wanted--; wantedTimer=540; } }
+  }
+
+  function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.x+=p.vx; p.y+=p.vy; p.vx*=0.94; p.vy*=0.94; p.life--;
+      if(p.life<=0) particles.splice(i,1);
+    }
+    for(let i=skids.length-1;i>=0;i--){ if(--skids[i].life<=0) skids.splice(i,1); }
   }
 
   function updateDriving(car){
@@ -590,8 +718,24 @@
 
     const dir = car.speed>=0?1:-1;
     const steer = car.turn * (Math.min(Math.abs(car.speed),3)/3);
-    if(K.left())  car.angle -= steer*dir;
-    if(K.right()) car.angle += steer*dir;
+    const turning = (K.left()?-1:0) + (K.right()?1:0);
+    if(turning) car.angle += steer*dir*turning;
+
+    // humo de escape al acelerar
+    if(K.up() && hasFuel && Math.abs(car.speed)>1 && frame%3===0){
+      const rx = car.x - Math.cos(car.angle)*(car.h/2);
+      const ry = car.y - Math.sin(car.angle)*(car.h/2);
+      spawnParticle(rx,ry,(Math.random()-0.5)*0.4,(Math.random()-0.5)*0.4,18,"rgba(120,120,120,0.5)",3);
+    }
+    // marcas de derrape (freno de mano a velocidad, o giro brusco rápido)
+    const skidding = (K.action() && Math.abs(car.speed)>2) || (turning && Math.abs(car.speed)>4.5);
+    if(skidding && frame%2===0){
+      for(const s of [-1,1]){
+        const wx = car.x + Math.cos(car.angle+Math.PI/2)*s*(car.w*0.35) - Math.cos(car.angle)*(car.h*0.35);
+        const wy = car.y + Math.sin(car.angle+Math.PI/2)*s*(car.w*0.35) - Math.sin(car.angle)*(car.h*0.35);
+        addSkid(wx,wy);
+      }
+    }
 
     const nx = car.x + Math.cos(car.angle)*car.speed;
     const ny = car.y + Math.sin(car.angle)*car.speed;
@@ -602,7 +746,12 @@
     else {
       const impact = Math.abs(car.speed);
       if(impact>3.5){ wanted=Math.min(5,wanted+1); wantedTimer=540; }
-      if(impact>2.2) damageCar(car, impact*2.2);   // choque daña el vehículo
+      if(impact>2.2){
+        damageCar(car, impact*2.2);   // choque daña el vehículo
+        cam.shake = Math.max(cam.shake, Math.min(14, impact*2));
+        burst(car.x+Math.cos(car.angle)*(car.h/2), car.y+Math.sin(car.angle)*(car.h/2), 10, "#ffd27f", impact*0.6, 24);
+        sfx("crash");
+      }
       car.speed *= -0.25;
     }
     // atropellos
@@ -618,6 +767,8 @@
     if(car.hp<=0 && !car.wrecked){
       car.wrecked = true; car.speed = 0;
       // expulsa al jugador si conducía este auto
+      burst(car.x, car.y, 26, "#ff7033", 5, 40); sfx("crash");
+      cam.shake = Math.max(cam.shake, 16);
       const idx = cars.indexOf(car);
       if(idx===drivingIndex){
         player.x = car.x + Math.cos(car.angle+Math.PI/2)*26;
@@ -632,6 +783,7 @@
     const perdido = Math.round(cash*0.4);
     cash -= perdido;
     wanted = 0; police.length = 0; bustTimer = 0;
+    combo = 0; comboTimer = 0; cam.shake = 12;
     // reaparece junto a la plaza
     player.x = WORLD/2 + 40; player.y = WORLD/2 + BLOCK/2;
     drivingIndex = -1;
@@ -770,16 +922,31 @@
   let nf = 0;
 
   function draw(){
-    update();                 // física + lógica del juego
+    if(gameState==="playing"){ update(); frame++; }   // física + lógica
     nf = nightLevel();
     const ent = drivingIndex>=0 ? cars[drivingIndex] : player;
-    const camX = ent.x - canvas.width/2;
-    const camY = ent.y - canvas.height/2;
-    const view = { x:camX, y:camY, w:canvas.width, h:canvas.height };
+
+    // --- cámara: seguimiento suave + look-ahead + zoom por velocidad ---
+    const spd = drivingIndex>=0 ? Math.abs(cars[drivingIndex].speed) : ent.speed;
+    const lead = (drivingIndex>=0 ? 70 : 26) * Math.min(1, spd/4);
+    const tx = ent.x + Math.cos(ent.angle)*lead;
+    const ty = ent.y + Math.sin(ent.angle)*lead;
+    cam.x += (tx - cam.x)*0.09;
+    cam.y += (ty - cam.y)*0.09;
+    const targetZoom = (drivingIndex>=0 ? 1.18 : 1.32) - Math.min(0.26, spd*0.03);
+    cam.zoom += (targetZoom - cam.zoom)*0.05;
+    cam.shake *= 0.88;
+    const shx = (Math.random()-0.5)*cam.shake, shy = (Math.random()-0.5)*cam.shake;
+
+    const halfW = (canvas.width/2)/cam.zoom, halfH = (canvas.height/2)/cam.zoom;
+    const camX = cam.x - halfW, camY = cam.y - halfH;
+    const view = { x:camX, y:camY, w:halfW*2, h:halfH*2 };
     const vis = (x,y,pad)=> x>camX-pad && x<camX+view.w+pad && y>camY-pad && y<camY+view.h+pad;
 
     ctx.save();
-    ctx.translate(-camX, -camY);
+    ctx.translate(canvas.width/2 + shx, canvas.height/2 + shy);
+    ctx.scale(cam.zoom, cam.zoom);
+    ctx.translate(-cam.x, -cam.y);
 
     // suelo (tierra)
     ctx.fillStyle = PAT.ground;
@@ -961,6 +1128,13 @@
       drawLight(it.x + ROAD/2 + 6, it.y + ROAD/2 + 6, lightFor("ew")); // controla tráfico horizontal
     }
 
+    // marcas de derrape
+    for(const s of skids){
+      if(!vis(s.x,s.y,10)) continue;
+      ctx.fillStyle = `rgba(20,20,20,${0.35*(s.life/240)})`;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 2.6, 0, Math.PI*2); ctx.fill();
+    }
+
     // monedas
     for(const c of coins){
       if(!vis(c.x,c.y,30)) continue;
@@ -1023,6 +1197,15 @@
     // jugador a pie
     if(drivingIndex<0) drawPlayer();
 
+    // partículas (humo, chispas, escombros)
+    for(const p of particles){
+      if(!vis(p.x,p.y,10)) continue;
+      ctx.globalAlpha = Math.max(0, p.life/p.max);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
     ctx.restore();
 
     // ===== COLOR GRADING estilo Vice City (espacio de pantalla) =====
@@ -1044,12 +1227,32 @@
     vg.addColorStop(1, "rgba(0,0,0,0.45)");
     ctx.fillStyle = vg; ctx.fillRect(0,0,canvas.width,canvas.height);
 
+    // flecha de waypoint hacia el objetivo si está fuera de pantalla
+    if(target) drawWaypoint(target, camX, camY);
+
     // HUD dinámico
     drawHud(ent);
     updateEngine();
     if(showMinimap) drawMinimap();
-    frame++;
     requestAnimationFrame(draw);
+  }
+
+  function drawWaypoint(target, camX, camY){
+    // posición del objetivo en pantalla
+    const sx = (target.x - cam.x)*cam.zoom + canvas.width/2;
+    const sy = (target.y - cam.y)*cam.zoom + canvas.height/2;
+    const margin = 60;
+    if(sx>margin && sx<canvas.width-margin && sy>margin && sy<canvas.height-margin) return; // visible
+    const cx = canvas.width/2, cy = canvas.height/2;
+    const a = Math.atan2(sy-cy, sx-cx);
+    const rx = cx + Math.cos(a)*(Math.min(canvas.width,canvas.height)/2 - 50);
+    const ry = cy + Math.sin(a)*(Math.min(canvas.width,canvas.height)/2 - 50);
+    ctx.save();
+    ctx.translate(rx, ry); ctx.rotate(a);
+    ctx.fillStyle = mission.stage==="pickup" ? "#4f8cff" : "#ff8c28";
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(16,0); ctx.lineTo(-10,-11); ctx.lineTo(-10,11); ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
 
   function drawLight(x, y, state){
@@ -1167,6 +1370,9 @@
     document.getElementById("speed").textContent =
       drivingIndex>=0 ? Math.round(Math.abs(cars[drivingIndex].speed)*18) : Math.round(player.speed*12);
     document.getElementById("cash").textContent = cash;
+    document.getElementById("score").textContent = score;
+    document.getElementById("best").textContent = best;
+    document.getElementById("combo").textContent = "x" + (combo+1);
     document.getElementById("stars").textContent = wanted>0 ? "★".repeat(wanted) : "—";
     const tod = nf>0.55 ? "🌙 Noche" : nf>0.3 ? "🌆 Atardecer" : "☀️ Día";
     const veh = drivingIndex>=0
